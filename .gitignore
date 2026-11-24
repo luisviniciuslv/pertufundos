@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+out/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+data/*.sqlite*
+coverage/
+.DS_Store
+Thumbs.db

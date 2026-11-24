@@ -1,0 +1,34 @@
+import type { DexQuoteSummary, EvmAddress, SafeMetaTx, TokenMetadata } from "@pertufundos/shared";
+
+export interface TokenPriceResult {
+  readonly unitPriceUsd: number;
+  readonly source: "OKX_LIVE" | "FALLBACK_DEMO";
+}
+
+export interface SwapBundleResult {
+  readonly transactions: SafeMetaTx[];
+  readonly quote: DexQuoteSummary;
+}
+
+export interface IDexGateway {
+  /** Obtém preço em USD de uma ação tokenizada Ondo via cotação DEX (ou referência em modo demo) */
+  getUnitPriceUsd(token: TokenMetadata): Promise<TokenPriceResult>;
+
+  /** Monta transações Safe (ERC-20 Approve se necessário + Swap na OKX DEX v6) */
+  buildSwapTransactions(params: {
+    safeAddress: EvmAddress;
+    fromToken: TokenMetadata;
+    toToken: TokenMetadata;
+    humanAmount: number;
+    slippagePercent: number;
+    currentAllowance: bigint;
+  }): Promise<SwapBundleResult>;
+
+  /** Monta transação Cross-Chain (OKX DEX v5) para enviar USDC da BNB Chain -> carteira pessoal na Base */
+  buildCrossChainUsdcExitTransactions(params: {
+    safeAddress: EvmAddress;
+    recipientBaseAddress: EvmAddress;
+    usdcAmount: number;
+    slippagePercent: number;
+  }): Promise<SafeMetaTx[]>;
+}
