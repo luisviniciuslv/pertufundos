@@ -50,8 +50,27 @@ const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().default(""),
 });
 
+const INSECURE_KNOWN_SECRETS = new Set([
+  "pertufundos_dev_session_hmac_secret_change_in_prod",
+  "troque_por_uma_string_aleatoria_longa_em_producao_64_chars",
+]);
+
+const DEMO_SAFE_PLACEHOLDER = "0x1111111111111111111111111111111111111111";
+
 export type AppConfig = z.infer<typeof envSchema>;
 
 export function loadConfig(overrides: Partial<Record<string, string>> = {}): AppConfig {
-  return envSchema.parse({ ...process.env, ...overrides });
+  const merged = { ...process.env, ...overrides };
+  const parsed = envSchema.parse(merged);
+
+  const isRealSafeConfigured = parsed.SAFE_ADDRESS.toLowerCase() !== DEMO_SAFE_PLACEHOLDER;
+  const isProdNodeEnv = merged.NODE_ENV === "production";
+
+  if ((isRealSafeConfigured || isProdNodeEnv) && INSECURE_KNOWN_SECRETS.has(parsed.AUTH_SESSION_SECRET)) {
+    throw new Error(
+      "[SECURITY BLOCK] Em produção ou com uma Safe real configurada, você DEVE gerar um AUTH_SESSION_SECRET exclusivo no .env (rode: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\").",
+    );
+  }
+
+  return parsed;
 }
