@@ -334,6 +334,7 @@ describe("Pertufundos API End-to-End Cryptographic Auth & Fund Flow", () => {
       vaultReader: {
         isDemoSafe: () => false,
         readSafeOwners: async () => [ACCOUNT_1.address.toLowerCase() as `0x${string}`],
+        readTokenMetadataOnChain: async () => ({ symbol: "MOCK", name: "Mock", decimals: 18 }),
         readVaultBalances: async () => [],
         readAllowance: async () => 0n,
         verifyUsdcDepositTx: async () => {

@@ -1,6 +1,7 @@
 import type {
   AuthChallengeResponse,
   AuthSessionResponse,
+  CatalogAsset,
   CastVoteInput,
   ConfirmExecutionInput,
   CreateRedemptionInput,
@@ -17,6 +18,8 @@ import type {
   RecordDepositInput,
   RedemptionPlan,
   RegisterMemberInput,
+  TokenMetadata,
+  TrackCustomAssetInput,
 } from "@pertufundos/shared";
 
 const API_BASE_URL =
@@ -101,6 +104,20 @@ export const fundApi = {
     }),
 
   getPortfolio: () => apiRequest<PortfolioSummary>("/portfolio"),
+
+  getAssetsCatalog: (params?: { q?: string; category?: "ALL" | "ONDO_STOCK" | "CRYPTO" }) => {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.category && params.category !== "ALL") qs.set("category", params.category);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiRequest<{ assets: CatalogAsset[] }>(`/assets/catalog${suffix}`);
+  },
+
+  trackCustomAsset: (input: TrackCustomAssetInput) =>
+    apiRequest<{ asset: TokenMetadata }>("/assets/track", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   getNavSnapshots: (limit = 20) =>
     apiRequest<{ snapshots: NavSnapshot[] }>(`/nav/snapshots?limit=${limit}`),

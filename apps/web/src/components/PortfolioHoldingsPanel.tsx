@@ -15,7 +15,7 @@ export function PortfolioHoldingsPanel({ holdings, members }: PortfolioHoldingsP
           <div>
             <h2 className="text-base font-semibold text-white">Ativos sob Custódia na Safe</h2>
             <p className="text-xs text-slate-400">
-              Ações tokenizadas Ondo Global Markets (BNB Chain) + Caixa em USDC
+              Ações/ETFs Ondo, Criptoativos 24/7 e Caixa em USDC (BNB Chain)
             </p>
           </div>
         </div>

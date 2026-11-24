@@ -1,3 +1,5 @@
+import type { TokenCategory, TokenMetadata } from "../constants/tokens.js";
+
 export type EvmAddress = `0x${string}`;
 
 export type LedgerEntryType = "DEPOSIT" | "REDEMPTION";
@@ -39,7 +41,7 @@ export interface AssetHolding {
   readonly symbol: string;
   readonly name: string;
   readonly address: EvmAddress;
-  readonly category: "STABLECOIN" | "ONDO_STOCK";
+  readonly category: TokenCategory;
   readonly rawBalance: string;
   readonly decimals: number;
   readonly balance: number;
@@ -210,4 +212,9 @@ export interface MemberTaxSummary {
   readonly currentMarketValueUsd: number;
   readonly totalRealizedGainUsd: number; // Para apuração de Ganho de Capital (GCAP)
   readonly entries: readonly TaxReportRow[];
+}
+
+export interface CatalogAsset extends TokenMetadata {
+  readonly isTrackedInVault: boolean;
+  readonly source: "CURATED" | "CUSTOM_TRACKED" | "OKX_DEX_LIST";
 }

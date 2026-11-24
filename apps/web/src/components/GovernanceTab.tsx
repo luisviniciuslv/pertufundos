@@ -2,16 +2,17 @@
 
 import {
   buildSafeQueueUrl,
-  ONDO_STOCK_TOKENS,
+  CURATED_INVESTABLE_TOKENS,
   type EvmAddress,
   type MarketSessionStatus,
   type PreparedSafeBatch,
   type Proposal,
 } from "@pertufundos/shared";
-import { CheckCircle2, ExternalLink, Play, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ChevronDown, CheckCircle2, ExternalLink, Play, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { Eip1193Provider } from "@safe-global/protocol-kit";
 import { useAccount } from "wagmi";
+import { AssetPickerModal } from "@/components/AssetPickerModal";
 import { fundApi } from "@/lib/api-client";
 import { shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
@@ -38,7 +39,18 @@ export function GovernanceTab({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tradeType, setTradeType] = useState<"BUY_ASSET" | "SELL_ASSET">("BUY_ASSET");
-  const [assetSymbol, setAssetSymbol] = useState<string>(ONDO_STOCK_TOKENS[0]!.symbol);
+  const [selectedAsset, setSelectedAsset] = useState<{
+    symbol: string;
+    name: string;
+    address: EvmAddress;
+    category: "ONDO_STOCK" | "CRYPTO" | "STABLECOIN";
+  }>({
+    symbol: CURATED_INVESTABLE_TOKENS[0]!.symbol,
+    name: CURATED_INVESTABLE_TOKENS[0]!.name,
+    address: CURATED_INVESTABLE_TOKENS[0]!.address,
+    category: CURATED_INVESTABLE_TOKENS[0]!.category,
+  });
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [amount, setAmount] = useState("500");
   const [maxSlippage, setMaxSlippage] = useState("0.5");
   const [forceOffHours, setForceOffHours] = useState(false);
@@ -67,7 +79,8 @@ export function GovernanceTab({
         title,
         description,
         type: tradeType,
-        assetSymbol,
+        assetSymbol: selectedAsset.symbol,
+        assetAddress: selectedAsset.address,
         amount: Number(amount),
         maxSlippagePercent: Number(maxSlippage),
         createdByAddress: activeWallet,
@@ -228,7 +241,7 @@ export function GovernanceTab({
                   : "border-slate-700 bg-slate-950 text-slate-400"
               }`}
             >
-              Comprar Ação
+              Comprar Ativo
             </button>
             <button
               type="button"
@@ -239,28 +252,45 @@ export function GovernanceTab({
                   : "border-slate-700 bg-slate-950 text-slate-400"
               }`}
             >
-              Vender Ação
+              Vender Ativo
             </button>
           </div>
 
           <div>
-            <label className="block text-xs text-slate-300 mb-1">Ação Tokenizada (Ondo)</label>
-            <select
-              value={assetSymbol}
-              onChange={(e) => setAssetSymbol(e.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white"
+            <label className="block text-xs text-slate-300 mb-1">
+              Ativo (Ações Ondo, Cripto 24/7 ou Contrato 0x...)
+            </label>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-left flex items-center justify-between hover:border-emerald-500/60 transition"
             >
-              {ONDO_STOCK_TOKENS.map((t) => (
-                <option key={t.symbol} value={t.symbol}>
-                  {t.symbol} — {t.name}
-                </option>
-              ))}
-            </select>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-white">{selectedAsset.symbol}</span>
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                      selectedAsset.category === "ONDO_STOCK"
+                        ? "bg-sky-500/15 text-sky-300"
+                        : "bg-amber-500/15 text-amber-300"
+                    }`}
+                  >
+                    {selectedAsset.category === "ONDO_STOCK" ? "AÇÃO / ETF" : "CRIPTO 24/7"}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 truncate max-w-[220px]">
+                  {selectedAsset.name}
+                </div>
+              </div>
+              <ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
           </div>
 
           <div>
             <label className="block text-xs text-slate-300 mb-1">
-              {tradeType === "BUY_ASSET" ? "Valor em USDC a Investir" : `Qtd. de ${assetSymbol} a Vender`}
+              {tradeType === "BUY_ASSET"
+                ? "Valor em USDC a Investir"
+                : `Qtd. de ${selectedAsset.symbol} a Vender`}
             </label>
             <input
               type="number"
@@ -278,7 +308,7 @@ export function GovernanceTab({
             <input
               type="text"
               required
-              placeholder={`Ex: Comprar US$ ${amount} de ${assetSymbol}`}
+              placeholder={`Ex: Comprar US$ ${amount} de ${selectedAsset.symbol}`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-sm text-white"
@@ -489,6 +519,12 @@ export function GovernanceTab({
           })}
         </div>
       </div>
+
+      <AssetPickerModal
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelectAsset={(asset) => setSelectedAsset(asset)}
+      />
     </div>
   );
 }

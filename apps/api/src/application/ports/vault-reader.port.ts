@@ -14,7 +14,15 @@ export interface VerifiedOnChainDeposit {
 
 export interface IVaultReader {
   isDemoSafe(safeAddress: EvmAddress): boolean;
-  readVaultBalances(safeAddress: EvmAddress): Promise<RawTokenSnapshot[]>;
+  readVaultBalances(
+    safeAddress: EvmAddress,
+    extraTokens?: readonly TokenMetadata[],
+  ): Promise<RawTokenSnapshot[]>;
+  readTokenMetadataOnChain(tokenAddress: EvmAddress): Promise<{
+    symbol: string;
+    name: string;
+    decimals: number;
+  }>;
   readSafeOwners(safeAddress: EvmAddress): Promise<EvmAddress[]>;
   verifyUsdcDepositTx(params: {
     txHash: `0x${string}`;

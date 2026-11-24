@@ -153,21 +153,21 @@ export function calculateProportionalSellPlan(params: {
     return [];
   }
 
-  const stockHoldings = holdings.filter(
-    (h) => h.category === "ONDO_STOCK" && h.marketValueUsd > 0 && h.unitPriceUsd > 0,
+  const investableHoldings = holdings.filter(
+    (h) => h.category !== "STABLECOIN" && h.marketValueUsd > 0 && h.unitPriceUsd > 0,
   );
-  const totalStocksUsd = stockHoldings.reduce((acc, h) => acc + h.marketValueUsd, 0);
+  const totalInvestedUsd = investableHoldings.reduce((acc, h) => acc + h.marketValueUsd, 0);
 
-  if (totalStocksUsd + 0.01 < deficitUsd) {
+  if (totalInvestedUsd + 0.01 < deficitUsd) {
     throw new Error(
-      `Liquidez insuficiente nas ações tokenizadas (${totalStocksUsd.toFixed(2)} USD) para cobrir déficit de ${deficitUsd.toFixed(2)} USD`,
+      `Liquidez insuficiente nos ativos investidos (${totalInvestedUsd.toFixed(2)} USD) para cobrir déficit de ${deficitUsd.toFixed(2)} USD`,
     );
   }
 
   const bufferMultiplier = 1 + slippageBufferPercent / 100;
 
-  return stockHoldings.map((stock) => {
-    const weight = stock.marketValueUsd / totalStocksUsd;
+  return investableHoldings.map((stock) => {
+    const weight = stock.marketValueUsd / totalInvestedUsd;
     const targetUsdWithBuffer = Math.min(stock.marketValueUsd, deficitUsd * weight * bufferMultiplier);
     const sellAmountTokens = Math.min(
       stock.balance,

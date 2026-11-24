@@ -7,6 +7,7 @@ import type {
   Proposal,
   ProposalStatus,
   ProposalType,
+  TokenMetadata,
   VoteDecision,
 } from "@pertufundos/shared";
 
@@ -71,6 +72,10 @@ export interface IFundRepository {
   }): Promise<Proposal>;
   markProposalSafeLinked(proposalId: string, safeTxHash: string): Promise<Proposal>;
   markProposalExecuted(proposalId: string, executionTxHash: string): Promise<Proposal>;
+
+  // Dynamic Custom / OKX Imported Tokens
+  listCustomTokens(): Promise<TokenMetadata[]>;
+  upsertCustomToken(token: TokenMetadata): Promise<TokenMetadata>;
 
   // Lifecycle
   close(): Promise<void>;

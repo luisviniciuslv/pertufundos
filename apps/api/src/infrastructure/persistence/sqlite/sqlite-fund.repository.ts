@@ -9,6 +9,7 @@ import type {
   NavSnapshot,
   Proposal,
   ProposalStatus,
+  TokenMetadata,
   VoteDecision,
 } from "@pertufundos/shared";
 import { ConflictError, NotFoundError } from "../../../domain/errors.js";
@@ -19,11 +20,13 @@ import type {
   RecordLedgerMutation,
 } from "../../../application/ports/fund-repository.port.js";
 import {
+  mapCustomTokenRow,
   mapLedgerRow,
   mapMemberRow,
   mapProposalRow,
   mapSnapshotRow,
   mapVoteRow,
+  type RawCustomTokenRow,
   type RawLedgerRow,
   type RawMemberRow,
   type RawProposalRow,
@@ -109,6 +112,18 @@ export class SqliteFundRepository implements IFundRepository {
         comment TEXT,
         created_at TEXT NOT NULL,
         UNIQUE(proposal_id, voter_address)
+      );
+
+      CREATE TABLE IF NOT EXISTS custom_tokens (
+        address TEXT PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        name TEXT NOT NULL,
+        chain_id INTEGER NOT NULL,
+        decimals INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        logo_url TEXT,
+        reference_price_usd REAL NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
       );
     `);
   }
@@ -413,6 +428,43 @@ export class SqliteFundRepository implements IFundRepository {
     const updated = await this.findProposalById(proposalId);
     if (!updated) throw new NotFoundError("Proposta não encontrada.");
     return updated;
+  }
+
+  async listCustomTokens(): Promise<TokenMetadata[]> {
+    const rows = this.db
+      .prepare(`SELECT * FROM custom_tokens ORDER BY symbol ASC`)
+      .all() as unknown as RawCustomTokenRow[];
+    return rows.map(mapCustomTokenRow);
+  }
+
+  async upsertCustomToken(token: TokenMetadata): Promise<TokenMetadata> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO custom_tokens (address, symbol, name, chain_id, decimals, category, logo_url, reference_price_usd, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(address) DO UPDATE SET
+           symbol = excluded.symbol,
+           name = excluded.name,
+           decimals = excluded.decimals,
+           category = excluded.category,
+           logo_url = COALESCE(excluded.logo_url, custom_tokens.logo_url)`,
+      )
+      .run(
+        token.address.toLowerCase(),
+        token.symbol,
+        token.name,
+        token.chainId,
+        token.decimals,
+        token.category,
+        token.logoUrl ?? null,
+        token.referencePriceUsd,
+        now,
+      );
+    const row = this.db
+      .prepare(`SELECT * FROM custom_tokens WHERE address = ?`)
+      .get(token.address.toLowerCase()) as unknown as RawCustomTokenRow;
+    return mapCustomTokenRow(row);
   }
 
   async close(): Promise<void> {

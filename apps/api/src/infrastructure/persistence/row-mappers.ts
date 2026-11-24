@@ -8,6 +8,8 @@ import type {
   ProposalStatus,
   ProposalType,
   ProposalVote,
+  TokenCategory,
+  TokenMetadata,
   VoteDecision,
 } from "@pertufundos/shared";
 
@@ -77,6 +79,30 @@ export interface RawVoteRow {
   decision: string;
   comment: string | null;
   created_at: string | Date;
+}
+
+export interface RawCustomTokenRow {
+  address: string;
+  symbol: string;
+  name: string;
+  chain_id: number | string;
+  decimals: number | string;
+  category: string;
+  logo_url: string | null;
+  reference_price_usd: number | string;
+}
+
+export function mapCustomTokenRow(row: RawCustomTokenRow): TokenMetadata {
+  return {
+    address: row.address.toLowerCase() as EvmAddress,
+    symbol: row.symbol,
+    name: row.name,
+    chainId: Number(row.chain_id),
+    decimals: Number(row.decimals),
+    category: row.category as TokenCategory,
+    logoUrl: row.logo_url ?? undefined,
+    referencePriceUsd: Number(row.reference_price_usd),
+  };
 }
 
 const toIso = (val: string | Date): string =>

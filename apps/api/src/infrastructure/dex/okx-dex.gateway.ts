@@ -2,7 +2,9 @@ import crypto from "node:crypto";
 import {
   BASE_USDC_TOKEN,
   BNB_USDC_TOKEN,
+  CURATED_INVESTABLE_TOKENS,
   fromRawUnits,
+  inferTokenCategory,
   SUPPORTED_CHAINS,
   toRawUnits,
   type DexQuoteSummary,
@@ -27,7 +29,57 @@ interface OkxApiResponse<T> {
   data: T[];
 }
 
+const SIMULATED_EXTRA_OKX_TOKENS: readonly TokenMetadata[] = [
+  {
+    symbol: "SOL",
+    name: "Solana (BNB Chain Peg)",
+    address: "0x570a5d26f7765ecb712c0924e4de545b89fd43df",
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    decimals: 18,
+    category: "CRYPTO",
+    referencePriceUsd: 192.0,
+  },
+  {
+    symbol: "LINK",
+    name: "Chainlink Token",
+    address: "0xf8a0bf9cf54bb92f17374d9e9a321e6a111a51bd",
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    decimals: 18,
+    category: "CRYPTO",
+    referencePriceUsd: 18.4,
+  },
+  {
+    symbol: "AAVE",
+    name: "Aave Token (BNB Chain)",
+    address: "0xfb6115445bff7b52feb98650c87f44907e58f802",
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    decimals: 18,
+    category: "CRYPTO",
+    referencePriceUsd: 265.0,
+  },
+  {
+    symbol: "UNI",
+    name: "Uniswap (BNB Chain)",
+    address: "0xbf5140a22578168fd562dccf235e5d43a02ce9b1",
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    decimals: 18,
+    category: "CRYPTO",
+    referencePriceUsd: 11.8,
+  },
+  {
+    symbol: "XRP",
+    name: "XRP (BNB Chain Peg)",
+    address: "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe",
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    decimals: 18,
+    category: "CRYPTO",
+    referencePriceUsd: 2.35,
+  },
+];
+
 export class OkxDexGateway implements IDexGateway {
+  private cachedChainTokens: { expiresAt: number; items: TokenMetadata[] } | null = null;
+
   constructor(private readonly config: AppConfig) {}
 
   private get hasLiveCredentials(): boolean {
@@ -36,6 +88,49 @@ export class OkxDexGateway implements IDexGateway {
         this.config.OKX_SECRET_KEY &&
         this.config.OKX_API_PASSPHRASE,
     );
+  }
+
+  async listAllChainTokens(): Promise<TokenMetadata[]> {
+    if (this.cachedChainTokens && this.cachedChainTokens.expiresAt > Date.now()) {
+      return this.cachedChainTokens.items;
+    }
+
+    if (!this.hasLiveCredentials) {
+      return [...CURATED_INVESTABLE_TOKENS, ...SIMULATED_EXTRA_OKX_TOKENS];
+    }
+
+    try {
+      const data = await this.requestOkx<{
+        decimals: string;
+        tokenContractAddress: string;
+        tokenLogoUrl?: string;
+        tokenName: string;
+        tokenSymbol: string;
+      }>("GET", "/api/v6/dex/aggregator/all-tokens", {
+        chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
+      });
+
+      const items: TokenMetadata[] = data
+        .filter((item) => /^0x[a-fA-F0-9]{40}$/.test(item.tokenContractAddress))
+        .map((item) => ({
+          symbol: item.tokenSymbol,
+          name: item.tokenName,
+          address: item.tokenContractAddress.toLowerCase() as EvmAddress,
+          chainId: SUPPORTED_CHAINS.BNB.id,
+          decimals: Number(item.decimals) || 18,
+          category: inferTokenCategory(item.tokenSymbol, item.tokenName),
+          logoUrl: item.tokenLogoUrl,
+          referencePriceUsd: 1.0,
+        }));
+
+      this.cachedChainTokens = {
+        expiresAt: Date.now() + 15 * 60 * 1000,
+        items,
+      };
+      return items;
+    } catch {
+      return [...CURATED_INVESTABLE_TOKENS, ...SIMULATED_EXTRA_OKX_TOKENS];
+    }
   }
 
   async getUnitPriceUsd(token: TokenMetadata): Promise<TokenPriceResult> {

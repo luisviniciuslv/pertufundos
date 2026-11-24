@@ -11,7 +11,10 @@ export interface SwapBundleResult {
 }
 
 export interface IDexGateway {
-  /** Obtém preço em USD de uma ação tokenizada Ondo via cotação DEX (ou referência em modo demo) */
+  /** Lista todos os tokens negociáveis na rede principal via OKX DEX (/all-tokens) */
+  listAllChainTokens(): Promise<TokenMetadata[]>;
+
+  /** Obtém preço em USD de um ativo via cotação DEX (ou referência em modo demo) */
   getUnitPriceUsd(token: TokenMetadata): Promise<TokenPriceResult>;
 
   /** Monta transações Safe (ERC-20 Approve se necessário + Swap na OKX DEX v6) */

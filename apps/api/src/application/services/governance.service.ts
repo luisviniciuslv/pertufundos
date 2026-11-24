@@ -4,7 +4,6 @@ import {
   calculateCapitalGainOnRedemption,
   calculateProportionalSellPlan,
   calculateRedemptionValueUsd,
-  getBnbTokenBySymbol,
   getUsMarketSessionStatus,
   P2P_ME_CONFIG,
   roundFinancial,
@@ -30,6 +29,7 @@ import {
 import type { IDexGateway } from "../ports/dex-gateway.port.js";
 import type { IFundRepository } from "../ports/fund-repository.port.js";
 import type { INotificationGateway } from "../ports/notification-gateway.port.js";
+import type { AssetCatalogService } from "./asset-catalog.service.js";
 import type { PortfolioValuationService } from "./portfolio-valuation.service.js";
 
 const PROPOSAL_TTL_HOURS = 48;
@@ -40,6 +40,7 @@ export class GovernanceService {
     private readonly config: AppConfig,
     private readonly repository: IFundRepository,
     private readonly valuationService: PortfolioValuationService,
+    private readonly assetCatalog: AssetCatalogService,
     private readonly dexGateway: IDexGateway,
     private readonly notifications: INotificationGateway,
   ) {}
@@ -70,6 +71,12 @@ export class GovernanceService {
       );
     }
 
+    // Garante que o ativo existe (Ondo Stock, Cripto ou Contrato Importado) e passa a ser rastreado na carteira
+    const resolvedAsset = await this.assetCatalog.resolveAndEnsureTracked({
+      symbol: input.assetSymbol,
+      address: input.assetAddress,
+    });
+
     const summary = await this.valuationService.getPortfolioSummary();
     if (input.type === "BUY_ASSET" && input.amount > summary.liquidUsdcBalance + 0.01) {
       throw new ValidationError(
@@ -78,10 +85,12 @@ export class GovernanceService {
     }
 
     if (input.type === "SELL_ASSET") {
-      const holding = summary.holdings.find((h) => h.symbol === input.assetSymbol);
+      const holding = summary.holdings.find(
+        (h) => h.address.toLowerCase() === resolvedAsset.address.toLowerCase(),
+      );
       if (!holding || input.amount > holding.balance + 1e-8) {
         throw new ValidationError(
-          `Saldo de ${input.assetSymbol} na Safe (${holding?.balance.toFixed(6) ?? 0}) insuficiente para venda de ${input.amount}.`,
+          `Saldo de ${resolvedAsset.symbol} na Safe (${holding?.balance.toFixed(6) ?? 0}) insuficiente para venda de ${input.amount}.`,
         );
       }
     }
@@ -92,7 +101,7 @@ export class GovernanceService {
       description: input.description,
       type: input.type,
       createdByAddress: creator.walletAddress,
-      assetSymbol: input.assetSymbol,
+      assetSymbol: resolvedAsset.symbol,
       amount: input.amount,
       maxSlippagePercent: input.maxSlippagePercent,
       requiredApprovals: this.config.SAFE_THRESHOLD,
@@ -270,30 +279,29 @@ export class GovernanceService {
     const warnings: string[] = [];
     const market = getUsMarketSessionStatus();
 
-    const touchesOndoStocks = proposal.type === "BUY_ASSET" || proposal.type === "SELL_ASSET";
-    if (touchesOndoStocks && !market.isOpen) {
-      if (this.config.ENFORCE_US_MARKET_HOURS && !options.forceOffHours) {
-        throw new GuardrailError(
-          market.warningMessage ??
-            "Pregão regular dos EUA fechado. Aguarde a abertura ou confirme override explícito.",
-        );
-      }
-      if (market.warningMessage) {
-        warnings.push(market.warningMessage);
-      }
-    }
-
     const allTransactions: SafeMetaTx[] = [];
     let primaryQuote = undefined;
 
     if (proposal.type === "BUY_ASSET" || proposal.type === "SELL_ASSET") {
-      const stockToken = getBnbTokenBySymbol(proposal.assetSymbol);
-      if (!stockToken) {
-        throw new ValidationError(`Token Ondo não suportado: ${proposal.assetSymbol}`);
+      const targetToken = await this.assetCatalog.resolveAndEnsureTracked({
+        symbol: proposal.assetSymbol,
+      });
+
+      // A trava de horário da bolsa americana aplica-se APENAS a ações/ETFs Ondo (Cripto negocia 24/7!)
+      if (targetToken.category === "ONDO_STOCK" && !market.isOpen) {
+        if (this.config.ENFORCE_US_MARKET_HOURS && !options.forceOffHours) {
+          throw new GuardrailError(
+            market.warningMessage ??
+              "Pregão regular dos EUA fechado para ações tokenizadas. Aguarde a abertura ou confirme override explícito.",
+          );
+        }
+        if (market.warningMessage) {
+          warnings.push(market.warningMessage);
+        }
       }
 
-      const fromToken = proposal.type === "BUY_ASSET" ? BNB_USDC_TOKEN : stockToken;
-      const toToken = proposal.type === "BUY_ASSET" ? stockToken : BNB_USDC_TOKEN;
+      const fromToken = proposal.type === "BUY_ASSET" ? BNB_USDC_TOKEN : targetToken;
+      const toToken = proposal.type === "BUY_ASSET" ? targetToken : BNB_USDC_TOKEN;
 
       const swapBundle = await this.dexGateway.buildSwapTransactions({
         safeAddress: this.config.SAFE_ADDRESS,
@@ -315,23 +323,26 @@ export class GovernanceService {
         maxSlippagePercent: proposal.maxSlippagePercent,
       });
 
-      if (plan.liquidationLegs.length > 0 && !market.isOpen) {
-        if (this.config.ENFORCE_US_MARKET_HOURS && !options.forceOffHours) {
-          throw new GuardrailError(
-            `O resgate exige venda proporcional de Ondo Stocks (US$ ${plan.usdcDeficitToSwap.toFixed(2)}), mas o pregão americano está fechado. ${market.warningMessage ?? ""}`,
-          );
-        }
-        if (market.warningMessage) warnings.push(market.warningMessage);
-      }
-
-      // 1. Liquida proporcionalmente ações tokenizadas para cobrir déficit de USDC
+      // 1. Liquida proporcionalmente ativos investidos (Ações Ondo e/ou Cripto) para cobrir déficit de USDC
       for (const leg of plan.liquidationLegs) {
-        const stockToken = getBnbTokenBySymbol(leg.symbol);
-        if (!stockToken || leg.sellAmountTokens <= 0) continue;
+        if (leg.sellAmountTokens <= 0) continue;
+        const assetToken = await this.assetCatalog.resolveAndEnsureTracked({
+          symbol: leg.symbol,
+          address: leg.tokenAddress,
+        });
+
+        if (assetToken.category === "ONDO_STOCK" && !market.isOpen) {
+          if (this.config.ENFORCE_US_MARKET_HOURS && !options.forceOffHours) {
+            throw new GuardrailError(
+              `O resgate exige venda proporcional de ações tokenizadas (${assetToken.symbol}), mas o pregão americano está fechado. ${market.warningMessage ?? ""}`,
+            );
+          }
+          if (market.warningMessage && warnings.length === 0) warnings.push(market.warningMessage);
+        }
 
         const legSwap = await this.dexGateway.buildSwapTransactions({
           safeAddress: this.config.SAFE_ADDRESS,
-          fromToken: stockToken,
+          fromToken: assetToken,
           toToken: BNB_USDC_TOKEN,
           humanAmount: leg.sellAmountTokens,
           slippagePercent: Math.min(proposal.maxSlippagePercent, this.config.MAX_SLIPPAGE_PERCENT),

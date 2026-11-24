@@ -1,8 +1,5 @@
 import { z } from "zod";
-import { ONDO_STOCK_TOKENS } from "../constants/tokens.js";
 import type { EvmAddress } from "./types.js";
-
-const allowedStockSymbols = ONDO_STOCK_TOKENS.map((t) => t.symbol) as [string, ...string[]];
 
 export const evmAddressSchema = z
   .string()
@@ -42,10 +39,16 @@ export const createTradeProposalSchema = z.object({
   title: z.string().trim().min(4, "Título muito curto").max(120),
   description: z.string().trim().max(1000).default(""),
   type: z.enum(["BUY_ASSET", "SELL_ASSET"]),
-  assetSymbol: z.enum(allowedStockSymbols),
+  assetSymbol: z.string().trim().min(1, "Símbolo do ativo é obrigatório").max(24),
+  assetAddress: evmAddressSchema.optional(),
   amount: z.number().positive("Quantidade/valor deve ser positivo"),
   maxSlippagePercent: z.number().min(0.1).max(2.0).default(0.5),
   createdByAddress: evmAddressSchema,
+});
+
+export const trackCustomAssetSchema = z.object({
+  address: evmAddressSchema,
+  category: z.enum(["ONDO_STOCK", "CRYPTO"]).optional(),
 });
 
 export const createRedemptionSchema = z.object({
@@ -86,3 +89,4 @@ export type LinkSafeTxInput = z.infer<typeof linkSafeTxSchema>;
 export type ConfirmExecutionInput = z.infer<typeof confirmExecutionSchema>;
 export type RequestAuthChallengeInput = z.infer<typeof requestAuthChallengeSchema>;
 export type VerifyAuthSignatureInput = z.infer<typeof verifyAuthSignatureSchema>;
+export type TrackCustomAssetInput = z.infer<typeof trackCustomAssetSchema>;

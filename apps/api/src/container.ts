@@ -3,6 +3,7 @@ import type { IDexGateway } from "./application/ports/dex-gateway.port.js";
 import type { IFundRepository } from "./application/ports/fund-repository.port.js";
 import type { INotificationGateway } from "./application/ports/notification-gateway.port.js";
 import type { IVaultReader } from "./application/ports/vault-reader.port.js";
+import { AssetCatalogService } from "./application/services/asset-catalog.service.js";
 import { DepositService } from "./application/services/deposit.service.js";
 import { GovernanceService } from "./application/services/governance.service.js";
 import { PortfolioValuationService } from "./application/services/portfolio-valuation.service.js";
@@ -21,6 +22,7 @@ export interface AppContainer {
   readonly dexGateway: IDexGateway;
   readonly notifications: INotificationGateway;
   readonly walletAuthService: WalletAuthService;
+  readonly assetCatalogService: AssetCatalogService;
   readonly valuationService: PortfolioValuationService;
   readonly depositService: DepositService;
   readonly governanceService: GovernanceService;
@@ -47,6 +49,7 @@ export function createContainer(
   const notifications = overrides.notifications ?? new WebhookNotificationGateway(config);
 
   const walletAuthService = new WalletAuthService(config, repository);
+  const assetCatalogService = new AssetCatalogService(repository, dexGateway, vaultReader);
   const valuationService = new PortfolioValuationService(
     config,
     repository,
@@ -63,6 +66,7 @@ export function createContainer(
     config,
     repository,
     valuationService,
+    assetCatalogService,
     dexGateway,
     notifications,
   );
@@ -75,6 +79,7 @@ export function createContainer(
     dexGateway,
     notifications,
     walletAuthService,
+    assetCatalogService,
     valuationService,
     depositService,
     governanceService,

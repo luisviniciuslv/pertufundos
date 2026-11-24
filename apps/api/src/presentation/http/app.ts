@@ -8,6 +8,7 @@ import {
   recordDepositSchema,
   registerMemberSchema,
   requestAuthChallengeSchema,
+  trackCustomAssetSchema,
   verifyAuthSignatureSchema,
   type EvmAddress,
   type ProposalStatus,
@@ -113,6 +114,30 @@ export function createHttpApp(container: AppContainer): Hono {
     const authWallet = requireAuthWallet(c);
     const member = await container.repository.findMemberByWallet(authWallet);
     return c.json({ walletAddress: authWallet, member });
+  });
+
+  // --- Catálogo Completo de Ativos (Ações Ondo + Cripto + Lista OKX DEX + Contrato 0x...) ---
+  api.get("/assets/catalog", async (c) => {
+    const searchQuery = c.req.query("q") ?? "";
+    const rawCat = c.req.query("category");
+    const category =
+      rawCat === "ONDO_STOCK" || rawCat === "CRYPTO" ? rawCat : ("ALL" as const);
+    const assets = await container.assetCatalogService.listAvailableAssets({
+      searchQuery,
+      category,
+      limit: 200,
+    });
+    return c.json({ assets });
+  });
+
+  api.post("/assets/track", async (c) => {
+    await requireAuthenticatedSafeOwner(c);
+    const body = trackCustomAssetSchema.parse(await c.req.json());
+    const asset = await container.assetCatalogService.importAndTrackAssetByAddress({
+      address: body.address,
+      categoryOverride: body.category,
+    });
+    return c.json({ asset }, 201);
   });
 
   // --- Visão Transparente do Grupo: Portfólio, Cap Table & NAV ---

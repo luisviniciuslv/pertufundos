@@ -69,3 +69,15 @@ CREATE TABLE IF NOT EXISTS proposal_votes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(proposal_id, voter_address)
 );
+
+CREATE TABLE IF NOT EXISTS custom_tokens (
+  address VARCHAR(42) PRIMARY KEY,
+  symbol VARCHAR(24) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  chain_id INTEGER NOT NULL,
+  decimals INTEGER NOT NULL,
+  category VARCHAR(20) NOT NULL CHECK (category IN ('STABLECOIN', 'ONDO_STOCK', 'CRYPTO')),
+  logo_url TEXT,
+  reference_price_usd NUMERIC(28, 8) NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -10,6 +10,7 @@ import type {
   NavSnapshot,
   Proposal,
   ProposalStatus,
+  TokenMetadata,
   VoteDecision,
 } from "@pertufundos/shared";
 import { ConflictError, NotFoundError } from "../../../domain/errors.js";
@@ -20,11 +21,13 @@ import type {
   RecordLedgerMutation,
 } from "../../../application/ports/fund-repository.port.js";
 import {
+  mapCustomTokenRow,
   mapLedgerRow,
   mapMemberRow,
   mapProposalRow,
   mapSnapshotRow,
   mapVoteRow,
+  type RawCustomTokenRow,
   type RawLedgerRow,
   type RawMemberRow,
   type RawProposalRow,
@@ -331,6 +334,38 @@ export class PostgresFundRepository implements IFundRepository {
     const updated = await this.findProposalById(proposalId);
     if (!updated) throw new NotFoundError("Proposta não encontrada.");
     return updated;
+  }
+
+  async listCustomTokens(): Promise<TokenMetadata[]> {
+    const { rows } = await this.pool.query<RawCustomTokenRow>(
+      `SELECT * FROM custom_tokens ORDER BY symbol ASC`,
+    );
+    return rows.map(mapCustomTokenRow);
+  }
+
+  async upsertCustomToken(token: TokenMetadata): Promise<TokenMetadata> {
+    const { rows } = await this.pool.query<RawCustomTokenRow>(
+      `INSERT INTO custom_tokens (address, symbol, name, chain_id, decimals, category, logo_url, reference_price_usd)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (address) DO UPDATE
+       SET symbol = EXCLUDED.symbol,
+           name = EXCLUDED.name,
+           decimals = EXCLUDED.decimals,
+           category = EXCLUDED.category,
+           logo_url = COALESCE(EXCLUDED.logo_url, custom_tokens.logo_url)
+       RETURNING *`,
+      [
+        token.address.toLowerCase(),
+        token.symbol,
+        token.name,
+        token.chainId,
+        token.decimals,
+        token.category,
+        token.logoUrl ?? null,
+        token.referencePriceUsd,
+      ],
+    );
+    return mapCustomTokenRow(rows[0]!);
   }
 
   async close(): Promise<void> {

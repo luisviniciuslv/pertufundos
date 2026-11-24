@@ -30,8 +30,9 @@ export class PortfolioValuationService {
    * deduz esse valor para apurar o NAV imediatamente anterior ao depósito (evitando autodiluir o aportador).
    */
   async getPortfolioSummary(preDepositDeductionUsd: number = 0): Promise<PortfolioSummary> {
+    const customTokens = await this.repository.listCustomTokens();
     const [rawSnapshots, members] = await Promise.all([
-      this.vaultReader.readVaultBalances(this.config.SAFE_ADDRESS),
+      this.vaultReader.readVaultBalances(this.config.SAFE_ADDRESS, customTokens),
       this.repository.listMembers(),
     ]);
 

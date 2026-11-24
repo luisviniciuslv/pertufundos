@@ -5,6 +5,7 @@ import {
   ONDO_STOCK_TOKENS,
   toRawUnits,
   type EvmAddress,
+  type TokenMetadata,
 } from "@pertufundos/shared";
 import { createPublicClient, erc20Abi, formatUnits, http, parseAbi, parseEventLogs } from "viem";
 import { bsc } from "viem/chains";
@@ -55,6 +56,37 @@ export class ViemVaultReader implements IVaultReader {
       functionName: "getOwners",
     });
     return owners.map((addr) => addr.toLowerCase() as EvmAddress);
+  }
+
+  async readTokenMetadataOnChain(tokenAddress: EvmAddress): Promise<{
+    symbol: string;
+    name: string;
+    decimals: number;
+  }> {
+    try {
+      const [symbol, name, decimals] = await Promise.all([
+        this.publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "symbol",
+        }),
+        this.publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "name",
+        }),
+        this.publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "decimals",
+        }),
+      ]);
+      return { symbol, name, decimals: Number(decimals) };
+    } catch {
+      throw new GuardrailError(
+        `Não foi possível ler metadados ERC-20/BEP-20 do contrato ${tokenAddress} na BNB Chain. Verifique se o endereço está correto.`,
+      );
+    }
   }
 
   /**
@@ -143,14 +175,23 @@ export class ViemVaultReader implements IVaultReader {
     return true;
   }
 
-  async readVaultBalances(safeAddress: EvmAddress): Promise<RawTokenSnapshot[]> {
+  async readVaultBalances(
+    safeAddress: EvmAddress,
+    extraTokens: readonly TokenMetadata[] = [],
+  ): Promise<RawTokenSnapshot[]> {
+    const mergedMap = new Map<string, TokenMetadata>();
+    for (const t of [...BNB_VAULT_TOKENS, ...extraTokens]) {
+      mergedMap.set(t.address.toLowerCase(), t);
+    }
+    const allVaultTokens = [...mergedMap.values()];
+
     if (this.isDemoSafe(safeAddress)) {
-      return this.buildSimulatedDemoBalances();
+      return this.buildSimulatedDemoBalances(allVaultTokens);
     }
 
     const [balances, multipliers] = await Promise.all([
       Promise.all(
-        BNB_VAULT_TOKENS.map((token) =>
+        allVaultTokens.map((token) =>
           this.publicClient.readContract({
             address: token.address,
             abi: erc20Abi,
@@ -159,10 +200,10 @@ export class ViemVaultReader implements IVaultReader {
           }),
         ),
       ),
-      this.readOndoMultipliers(),
+      this.readOndoMultipliers(allVaultTokens),
     ]);
 
-    return BNB_VAULT_TOKENS.map((token, idx) => ({
+    return allVaultTokens.map((token, idx) => ({
       token,
       rawBalance: balances[idx] ?? 0n,
       sharesMultiplier: multipliers.get(token.address.toLowerCase()) ?? 1.0,
@@ -186,7 +227,9 @@ export class ViemVaultReader implements IVaultReader {
     });
   }
 
-  private async readOndoMultipliers(): Promise<Map<string, number>> {
+  private async readOndoMultipliers(
+    vaultTokens: readonly TokenMetadata[],
+  ): Promise<Map<string, number>> {
     const result = new Map<string, number>();
     const oracleAddress = this.config.ONDO_SHARES_ORACLE_ADDRESS;
     if (!oracleAddress || !/^0x[a-fA-F0-9]{40}$/.test(oracleAddress)) {
@@ -194,7 +237,11 @@ export class ViemVaultReader implements IVaultReader {
     }
 
     try {
-      const stockAddresses = ONDO_STOCK_TOKENS.map((t) => t.address);
+      const stockAddresses = vaultTokens
+        .filter((t) => t.category === "ONDO_STOCK")
+        .map((t) => t.address);
+      if (stockAddresses.length === 0) return result;
+
       const [sValues] = await this.publicClient.readContract({
         address: oracleAddress as EvmAddress,
         abi: ondoSharesOracleAbi,
@@ -215,7 +262,9 @@ export class ViemVaultReader implements IVaultReader {
     return result;
   }
 
-  private async buildSimulatedDemoBalances(): Promise<RawTokenSnapshot[]> {
+  private async buildSimulatedDemoBalances(
+    allVaultTokens: readonly TokenMetadata[],
+  ): Promise<RawTokenSnapshot[]> {
     const [members, executedProposals] = await Promise.all([
       this.repository.listMembers(),
       this.repository.listProposals("EXECUTED"),
@@ -226,21 +275,26 @@ export class ViemVaultReader implements IVaultReader {
       0,
     );
 
-    const stockBalances = new Map<string, number>(
-      ONDO_STOCK_TOKENS.map((t) => [t.symbol, 0]),
+    const assetBalances = new Map<string, number>(
+      allVaultTokens
+        .filter((t) => t.category !== "STABLECOIN")
+        .map((t) => [t.symbol.toLowerCase(), 0]),
     );
 
     for (const p of executedProposals) {
-      const token = ONDO_STOCK_TOKENS.find((t) => t.symbol === p.assetSymbol);
-      if (!token) continue;
+      const token = allVaultTokens.find(
+        (t) => t.symbol.toLowerCase() === p.assetSymbol.toLowerCase(),
+      );
+      if (!token || token.category === "STABLECOIN") continue;
+      const key = token.symbol.toLowerCase();
       if (p.type === "BUY_ASSET") {
         usdcBalance = Math.max(0, usdcBalance - p.amount);
         const boughtUnits = p.amount / token.referencePriceUsd;
-        stockBalances.set(token.symbol, (stockBalances.get(token.symbol) ?? 0) + boughtUnits * 1.035);
+        assetBalances.set(key, (assetBalances.get(key) ?? 0) + boughtUnits * 1.035);
       } else if (p.type === "SELL_ASSET") {
-        const current = stockBalances.get(token.symbol) ?? 0;
+        const current = assetBalances.get(key) ?? 0;
         const sold = Math.min(current, p.amount);
-        stockBalances.set(token.symbol, current - sold);
+        assetBalances.set(key, current - sold);
         usdcBalance += sold * token.referencePriceUsd;
       }
     }
@@ -252,20 +306,27 @@ export class ViemVaultReader implements IVaultReader {
       QQQon: 1.0041,
     };
 
-    return BNB_VAULT_TOKENS.map((token) => {
-      if (token.address.toLowerCase() === BNB_USDC_TOKEN.address.toLowerCase()) {
+    return allVaultTokens
+      .filter((token) => {
+        if (token.address.toLowerCase() === BNB_USDC_TOKEN.address.toLowerCase()) return true;
+        const qty = assetBalances.get(token.symbol.toLowerCase()) ?? 0;
+        // No modo demo, exibe os 4 ativos iniciais ou qualquer ativo que já possua saldo > 0
+        return qty > 0 || ["NVDAon", "AAPLon", "MSFTon", "QQQon", "BTCB", "ETH"].includes(token.symbol);
+      })
+      .map((token) => {
+        if (token.address.toLowerCase() === BNB_USDC_TOKEN.address.toLowerCase()) {
+          return {
+            token,
+            rawBalance: toRawUnits(Math.max(0, usdcBalance), token.decimals),
+            sharesMultiplier: 1.0,
+          };
+        }
+        const qty = assetBalances.get(token.symbol.toLowerCase()) ?? 0;
         return {
           token,
-          rawBalance: toRawUnits(Math.max(0, usdcBalance), token.decimals),
-          sharesMultiplier: 1.0,
+          rawBalance: toRawUnits(Math.max(0, qty), token.decimals),
+          sharesMultiplier: demoMultipliers[token.symbol] ?? 1.0,
         };
-      }
-      const qty = stockBalances.get(token.symbol) ?? 0;
-      return {
-        token,
-        rawBalance: toRawUnits(Math.max(0, qty), token.decimals),
-        sharesMultiplier: demoMultipliers[token.symbol] ?? 1.0,
-      };
-    });
+      });
   }
 }
