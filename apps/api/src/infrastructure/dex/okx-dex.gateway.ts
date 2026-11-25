@@ -297,55 +297,18 @@ export class OkxDexGateway implements IDexGateway {
       ];
     }
 
-    const crossTx = await this.requestOkx<{
-      tx: {
-        to: EvmAddress;
-        data: `0x${string}`;
-        value: string;
-      };
-    }>("GET", "/api/v5/dex/cross-chain/build-tx", {
-      fromChainId: SUPPORTED_CHAINS.BNB.okxChainIndex,
-      toChainId: SUPPORTED_CHAINS.BASE.okxChainIndex,
-      fromTokenAddress: BNB_USDC_TOKEN.address,
-      toTokenAddress: BASE_USDC_TOKEN.address,
-      amount: rawBnbUsdcAmount.toString(),
-      slippage: String(params.slippagePercent / 100),
+    const { transactions } = await this.buildLiveCrossChainUsdcSwap({
+      fromChain: SUPPORTED_CHAINS.BNB,
+      toChain: SUPPORTED_CHAINS.BASE,
+      fromToken: BNB_USDC_TOKEN,
+      toToken: BASE_USDC_TOKEN,
       userWalletAddress: params.safeAddress,
       receiveAddress: params.recipientBaseAddress,
+      usdcAmount: params.usdcAmount,
+      slippagePercent: params.slippagePercent,
     });
 
-    const bridgeItem = crossTx[0];
-    if (!bridgeItem) {
-      throw new DomainError(
-        "OKX Cross-Chain Bridge não encontrou rota BNB -> Base para este valor.",
-        502,
-        "OKX_BRIDGE_NO_ROUTE",
-      );
-    }
-
-    const bridgeRouter = bridgeItem.tx.to.toLowerCase() as EvmAddress;
-    const approveCalldata = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "approve",
-      args: [bridgeRouter, rawBnbUsdcAmount],
-    });
-
-    return [
-      {
-        to: BNB_USDC_TOKEN.address,
-        value: "0",
-        data: approveCalldata,
-        operation: 0,
-        description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC para OKX Cross-Chain Router`,
-      },
-      {
-        to: bridgeRouter,
-        value: bridgeItem.tx.value || "0",
-        data: bridgeItem.tx.data,
-        operation: 0,
-        description: `Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC -> Base (${params.recipientBaseAddress})`,
-      },
-    ];
+    return transactions;
   }
 
   async buildCrossChainBaseToBscBridgeTransactions(params: {
@@ -396,28 +359,66 @@ export class OkxDexGateway implements IDexGateway {
       };
     }
 
+    const { transactions, expectedOutAmount } = await this.buildLiveCrossChainUsdcSwap({
+      fromChain: SUPPORTED_CHAINS.BASE,
+      toChain: SUPPORTED_CHAINS.BNB,
+      fromToken: BASE_USDC_TOKEN,
+      toToken: BNB_USDC_TOKEN,
+      userWalletAddress: params.fromBaseAddress,
+      receiveAddress: params.recipientBscAddress,
+      usdcAmount: params.usdcAmount,
+      slippagePercent: params.slippagePercent,
+      getSourceAllowance: params.getBaseAllowance,
+    });
+
+    return {
+      chainId: SUPPORTED_CHAINS.BASE.id,
+      destinationChainId: SUPPORTED_CHAINS.BNB.id,
+      fromAddress: params.fromBaseAddress,
+      recipientBscAddress: params.recipientBscAddress,
+      amountUsdc: params.usdcAmount,
+      expectedBscUsdc: expectedOutAmount,
+      source: "OKX_LIVE",
+      transactions,
+    };
+  }
+
+  private async buildLiveCrossChainUsdcSwap(params: {
+    fromChain: (typeof SUPPORTED_CHAINS)[keyof typeof SUPPORTED_CHAINS];
+    toChain: (typeof SUPPORTED_CHAINS)[keyof typeof SUPPORTED_CHAINS];
+    fromToken: TokenMetadata;
+    toToken: TokenMetadata;
+    userWalletAddress: EvmAddress;
+    receiveAddress: EvmAddress;
+    usdcAmount: number;
+    slippagePercent: number;
+    getSourceAllowance?: (spenderAddress: EvmAddress) => Promise<bigint>;
+  }): Promise<{ transactions: SafeMetaTx[]; expectedOutAmount: number }> {
+    const rawFromAmount = toRawUnits(params.usdcAmount, params.fromToken.decimals);
     const transactions: SafeMetaTx[] = [];
 
     const approveData = await this.requestOkx<{
       data: `0x${string}`;
       dexContractAddress: EvmAddress;
     }>("GET", "/api/v6/dex/aggregator/approve-transaction", {
-      chainIndex: SUPPORTED_CHAINS.BASE.okxChainIndex,
-      tokenContractAddress: BASE_USDC_TOKEN.address,
-      approveAmount: rawBaseUsdcAmount.toString(),
+      chainIndex: params.fromChain.okxChainIndex,
+      tokenContractAddress: params.fromToken.address,
+      approveAmount: rawFromAmount.toString(),
     });
 
     const approveItem = approveData[0];
     if (approveItem) {
       const spender = approveItem.dexContractAddress.toLowerCase() as EvmAddress;
-      const currentAllowance = await params.getBaseAllowance(spender).catch(() => 0n);
-      if (currentAllowance < rawBaseUsdcAmount) {
+      const currentAllowance = params.getSourceAllowance
+        ? await params.getSourceAllowance(spender).catch(() => 0n)
+        : 0n;
+      if (currentAllowance < rawFromAmount) {
         transactions.push({
-          to: BASE_USDC_TOKEN.address,
+          to: params.fromToken.address,
           value: "0",
           data: approveItem.data,
           operation: 0,
-          description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (Base) para o roteador OKX`,
+          description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (${params.fromChain.name}) para OKX Cross-Chain`,
         });
       }
     }
@@ -432,29 +433,29 @@ export class OkxDexGateway implements IDexGateway {
         data: `0x${string}`;
         value: string;
       };
-    }>("GET", "/api/v5/dex/cross-chain/build-tx", {
-      fromChainId: SUPPORTED_CHAINS.BASE.okxChainIndex,
-      toChainId: SUPPORTED_CHAINS.BNB.okxChainIndex,
-      fromTokenAddress: BASE_USDC_TOKEN.address,
-      toTokenAddress: BNB_USDC_TOKEN.address,
-      amount: rawBaseUsdcAmount.toString(),
-      slippage: String(params.slippagePercent / 100),
-      userWalletAddress: params.fromBaseAddress,
-      receiveAddress: params.recipientBscAddress,
+    }>("GET", "/api/v6/dex/cross-chain/swap", {
+      fromChainIndex: params.fromChain.okxChainIndex,
+      toChainIndex: params.toChain.okxChainIndex,
+      fromTokenAddress: params.fromToken.address,
+      toTokenAddress: params.toToken.address,
+      amount: rawFromAmount.toString(),
+      slippagePercent: String(params.slippagePercent),
+      userWalletAddress: params.userWalletAddress,
+      receiveAddress: params.receiveAddress,
     });
 
     const bridgeItem = crossTx[0];
     if (!bridgeItem?.tx) {
       throw new DomainError(
-        "OKX Cross-Chain Bridge não encontrou rota Base -> BNB Chain para este valor.",
-        502,
+        `OKX Cross-Chain não encontrou rota ${params.fromChain.name} -> ${params.toChain.name} para este valor.`,
+        422,
         "OKX_BRIDGE_NO_ROUTE",
       );
     }
 
     const rawExpectedTo = bridgeItem.routerResult?.toTokenAmount ?? bridgeItem.toTokenAmount;
-    const expectedBscUsdc = rawExpectedTo
-      ? fromRawUnits(rawExpectedTo, BNB_USDC_TOKEN.decimals)
+    const expectedOutAmount = rawExpectedTo
+      ? fromRawUnits(rawExpectedTo, params.toToken.decimals)
       : params.usdcAmount;
 
     const bridgeRouter = bridgeItem.tx.to.toLowerCase() as EvmAddress;
@@ -463,19 +464,10 @@ export class OkxDexGateway implements IDexGateway {
       value: bridgeItem.tx.value || "0",
       data: bridgeItem.tx.data,
       operation: 0,
-      description: `Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC (Base) -> BNB Chain`,
+      description: `Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC (${params.fromChain.name} -> ${params.toChain.name})`,
     });
 
-    return {
-      chainId: SUPPORTED_CHAINS.BASE.id,
-      destinationChainId: SUPPORTED_CHAINS.BNB.id,
-      fromAddress: params.fromBaseAddress,
-      recipientBscAddress: params.recipientBscAddress,
-      amountUsdc: params.usdcAmount,
-      expectedBscUsdc,
-      source: "OKX_LIVE",
-      transactions,
-    };
+    return { transactions, expectedOutAmount };
   }
 
   private buildSimulatedSwapBundle(
@@ -572,18 +564,28 @@ export class OkxDexGateway implements IDexGateway {
     });
 
     if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      let detail = errText;
+      try {
+        const parsedErr = JSON.parse(errText) as { msg?: string; message?: string; code?: string };
+        detail = parsedErr.msg || parsedErr.message || errText;
+      } catch {
+        // Mantém texto bruto caso não seja JSON
+      }
+      console.error(`[OKX HTTP ${response.status}] ${requestPath}:`, detail);
       throw new DomainError(
-        `Falha HTTP ${response.status} ao consultar OKX DEX (${requestPath})`,
-        502,
+        `Falha HTTP ${response.status} ao consultar OKX DEX (${requestPath})${detail ? `: ${detail}` : ""}`,
+        422,
         "OKX_HTTP_ERROR",
       );
     }
 
     const payload = (await response.json()) as OkxApiResponse<T>;
     if (payload.code !== "0") {
+      console.error(`[OKX API ${payload.code}] ${requestPath}:`, payload.msg);
       throw new DomainError(
         `Erro OKX DEX [${payload.code}]: ${payload.msg}`,
-        502,
+        422,
         "OKX_API_ERROR",
       );
     }
