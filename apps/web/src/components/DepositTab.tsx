@@ -155,16 +155,17 @@ export function DepositTab({
     setBridgeTxHash(null);
 
     try {
-      const { bridge } = await fundApi.prepareBaseBridge({
+      const initial = await fundApi.prepareBaseBridge({
         fromAddress: activeWallet,
         amountUsdc: amount,
-        slippagePercent: 1.0,
+        slippagePercent: 2.0,
       });
       if (bridgeAttemptRef.current !== attemptId) return;
 
+      let activeBridge = initial.bridge;
       if (!isConnected || safeMultisigClient.isDemoSafe(safeAddress)) {
         setFeedback(
-          `[SIMULAÇÃO] Rota OKX preparada para ${amount.toFixed(2)} USDC (Base -> BNB Chain, ${bridge.transactions.length} transações).`,
+          `[SIMULAÇÃO] Rota OKX preparada para ${amount.toFixed(2)} USDC (Base -> BNB Chain, ${activeBridge.transactions.length} transações).`,
         );
         return;
       }
@@ -179,36 +180,106 @@ export function DepositTab({
       });
       if (bridgeAttemptRef.current !== attemptId) return;
 
-      let lastHash: `0x${string}` | undefined;
-      for (const [idx, tx] of bridge.transactions.entries()) {
-        setBridgeStep(
-          `3/4 Confirme no app/extensão da sua carteira (${idx + 1}/${bridge.transactions.length}): ${tx.description}`,
-        );
+      const sendAndConfirmBaseTx = async (
+        tx: (typeof activeBridge.transactions)[number],
+        stepLabel: string,
+        waitLabel: string,
+      ): Promise<`0x${string}`> => {
+        const valueWei = BigInt(tx.value || "0");
+        const isApproveTx = tx.to.toLowerCase() === BASE_USDC_TOKEN.address.toLowerCase();
+
+        if (!isApproveTx) {
+          if (baseEthBalance !== undefined && baseEthBalance.value <= valueWei) {
+            const neededEth = Number(valueWei) / 1e18;
+            throw new Error(
+              `ETH insuficiente na Base para pagar a taxa da bridge: a rota OKX exige ${neededEth.toFixed(5)} ETH de taxa cross-chain + gás, mas sua carteira tem ${baseEthHuman.toFixed(5)} ETH.`,
+            );
+          }
+
+          if (basePublicClient) {
+            try {
+              await basePublicClient.call({
+                account: activeWallet,
+                to: tx.to,
+                data: tx.data,
+                value: valueWei,
+              });
+            } catch (simErr) {
+              const rawMsg =
+                simErr instanceof Error ? simErr.message.split("\n")[0] : "reversão na simulação";
+              throw new Error(
+                `Simulação na rede Base detectou que a bridge iria falhar on-chain (${rawMsg}). Verifique se há ETH suficiente para a taxa da bridge + gás e se o valor em USDC é aceito pela rota.`,
+              );
+            }
+          }
+        }
+
+        setBridgeStep(stepLabel);
         const hash = await sendTransactionAsync({
           to: tx.to,
           data: tx.data,
-          value: BigInt(tx.value || "0"),
+          value: valueWei,
           chainId: SUPPORTED_CHAINS.BASE.id,
         });
-        if (bridgeAttemptRef.current !== attemptId) return;
-        lastHash = hash;
+        if (bridgeAttemptRef.current !== attemptId) return hash;
         setBridgeTxHash(hash);
+
         if (basePublicClient) {
-          setBridgeStep(
-            `4/4 Aguardando confirmação na rede Base (${idx + 1}/${bridge.transactions.length})...`,
-          );
-          await basePublicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
-          if (bridgeAttemptRef.current !== attemptId) return;
+          setBridgeStep(waitLabel);
+          const receipt = await basePublicClient.waitForTransactionReceipt({
+            hash,
+            timeout: 120_000,
+          });
+          if (bridgeAttemptRef.current !== attemptId) return hash;
+          if (receipt.status !== "success") {
+            throw new Error(
+              `A transação falhou on-chain na rede Base (status: reverted). Confira o motivo no BaseScan: ${buildExplorerTxUrl(hash, SUPPORTED_CHAINS.BASE.id)}`,
+            );
+          }
         }
+        return hash;
+      };
+
+      let lastHash: `0x${string}` | undefined;
+      if (activeBridge.transactions.length > 1) {
+        const approveTx = activeBridge.transactions[0]!;
+        lastHash = await sendAndConfirmBaseTx(
+          approveTx,
+          `3/4 Confirme na sua carteira (1/2 — Aprovar USDC): ${approveTx.description}`,
+          "3/4 Aguardando confirmação do Approve na rede Base...",
+        );
+        if (bridgeAttemptRef.current !== attemptId) return;
+
+        // Rebusca calldata da bridge com allowance já minerada para evitar cotação vencida
+        setBridgeStep("3/4 Atualizando cotação fresca da bridge após Approve...");
+        const refreshed = await fundApi.prepareBaseBridge({
+          fromAddress: activeWallet,
+          amountUsdc: amount,
+          slippagePercent: 2.0,
+        });
+        if (bridgeAttemptRef.current !== attemptId) return;
+        activeBridge = refreshed.bridge;
       }
+
+      const swapTx = activeBridge.transactions[activeBridge.transactions.length - 1];
+      if (!swapTx) {
+        throw new Error("A OKX não retornou a transação final de bridge.");
+      }
+
+      lastHash = await sendAndConfirmBaseTx(
+        swapTx,
+        `3/4 Confirme na sua carteira (${activeBridge.transactions.length === 1 ? "Bridge" : "2/2 — Enviar Bridge"}): ${swapTx.description}`,
+        "4/4 Aguardando confirmação da bridge na rede Base...",
+      );
+      if (bridgeAttemptRef.current !== attemptId) return;
 
       if (lastHash) {
         setBridgeTxHash(lastHash);
       }
       await refreshWalletBalances();
-      setAmountUsd(String(Number(bridge.expectedBscUsdc.toFixed(2))));
+      setAmountUsd(String(Number(activeBridge.expectedBscUsdc.toFixed(2))));
       setFeedback(
-        `Bridge Base -> BNB Chain enviada! Aguarde ~1–2 minutos para ~${bridge.expectedBscUsdc.toFixed(2)} USDC caírem na sua BNB Chain e depois clique em "Transferir USDC para a Safe".`,
+        `Bridge Base -> BNB Chain confirmada na Base! Aguarde ~1–2 minutos para ~${activeBridge.expectedBscUsdc.toFixed(2)} USDC caírem na sua BNB Chain e depois clique em "Transferir USDC para a Safe".`,
       );
     } catch (err) {
       if (bridgeAttemptRef.current === attemptId) {
@@ -267,7 +338,15 @@ export function DepositTab({
           chainId: SUPPORTED_CHAINS.BNB.id,
         });
         if (bscPublicClient) {
-          await bscPublicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 });
+          const receipt = await bscPublicClient.waitForTransactionReceipt({
+            hash: txHash,
+            timeout: 120_000,
+          });
+          if (receipt.status !== "success") {
+            throw new Error(
+              `A transferência de USDC falhou on-chain na BNB Chain (status: reverted). Confira no BscScan: ${buildExplorerTxUrl(txHash, SUPPORTED_CHAINS.BNB.id)}`,
+            );
+          }
         }
       } else {
         // Hash determinístico simulado para testes locais
@@ -396,7 +475,7 @@ export function DepositTab({
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Gás Base: {baseEthHuman.toFixed(5)} ETH
-                {baseEthHuman < 0.00005 && " (deixe ~US$ 0,05 em ETH na Base)"}
+                {baseEthHuman < 0.0003 && " (deixe ~US$ 0,50–1,50 em ETH na Base para taxa + gás da bridge)"}
               </p>
             </div>
 

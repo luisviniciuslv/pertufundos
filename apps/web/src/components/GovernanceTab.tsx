@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  buildExplorerTxUrl,
   buildSafeQueueUrl,
   CURATED_INVESTABLE_TOKENS,
   type EvmAddress,
@@ -234,9 +235,15 @@ export function GovernanceTab({
       });
       if (!simulated && bscPublicClient) {
         setMessage("Transação enviada para a BNB Chain. Aguardando confirmação on-chain...");
-        await bscPublicClient.waitForTransactionReceipt({
+        const receipt = await bscPublicClient.waitForTransactionReceipt({
           hash: executionTxHash as `0x${string}`,
+          timeout: 120_000,
         });
+        if (receipt.status !== "success") {
+          throw new Error(
+            `A execução na Safe falhou on-chain na BNB Chain (status: reverted). Confira em ${buildExplorerTxUrl(executionTxHash, primaryChainId)}`,
+          );
+        }
       }
       await fundApi.confirmExecution(proposal.id, {
         executionTxHash,
