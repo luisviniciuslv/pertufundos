@@ -86,6 +86,13 @@ export class PostgresFundRepository implements IFundRepository {
     await this.pool.query(sql);
   }
 
+  // TODO: REMOVER RESET TEMPORÁRIO após confirmação do usuário
+  async clearAllDataForReset(): Promise<void> {
+    await this.pool.query(
+      "TRUNCATE TABLE proposal_votes, proposals, ledger_entries, nav_snapshots, users, custom_tokens RESTART IDENTITY CASCADE;",
+    );
+  }
+
   async listMembers(): Promise<Member[]> {
     const { rows } = await this.pool.query<RawMemberRow>(
       `SELECT * FROM users ORDER BY created_at ASC`,
