@@ -25,6 +25,7 @@ import { AssetPickerModal } from "@/components/AssetPickerModal";
 import { fundApi } from "@/lib/api-client";
 import { shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
+import { ensureWalletChain } from "@/lib/wallet-helpers";
 
 interface GovernanceTabProps {
   safeAddress: EvmAddress;
@@ -77,9 +78,13 @@ export function GovernanceTab({
   }
 
   async function ensurePrimaryChain(): Promise<void> {
-    if (chainId && chainId !== primaryChainId && switchChainAsync) {
-      await switchChainAsync({ chainId: primaryChainId });
-    }
+    await ensureWalletChain({
+      currentChainId: chainId,
+      targetChainId: primaryChainId,
+      targetChainLabel: "BNB Smart Chain",
+      connectorId: connector?.id,
+      switchChainAsync,
+    });
   }
 
   async function handleCreateProposal(e: FormEvent) {

@@ -36,6 +36,7 @@ import {
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
+import { ensureWalletChain, withTimeout } from "@/lib/wallet-helpers";
 
 interface DepositTabProps {
   safeAddress: EvmAddress;
@@ -53,7 +54,7 @@ export function DepositTab({
   ledgerEntries,
   onRefresh,
 }: DepositTabProps) {
-  const { address: connectedAddress, chainId: currentChainId, isConnected } = useAccount();
+  const { address: connectedAddress, chainId: currentChainId, connector, isConnected } = useAccount();
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
   const { sendTransactionAsync } = useSendTransaction();
@@ -95,6 +96,7 @@ export function DepositTab({
   const [newWallet, setNewWallet] = useState("");
   const [busy, setBusy] = useState(false);
   const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeStep, setBridgeStep] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,6 +147,7 @@ export function DepositTab({
     }
 
     setBridgeBusy(true);
+    setBridgeStep("1/4 Preparando rota na OKX...");
     setError(null);
     setFeedback(null);
     setBridgeTxHash(null);
@@ -163,21 +166,37 @@ export function DepositTab({
         return;
       }
 
-      if (currentChainId !== SUPPORTED_CHAINS.BASE.id) {
-        await switchChainAsync({ chainId: SUPPORTED_CHAINS.BASE.id });
-      }
+      setBridgeStep("2/4 Trocando carteira para a rede Base...");
+      await ensureWalletChain({
+        currentChainId,
+        targetChainId: SUPPORTED_CHAINS.BASE.id,
+        targetChainLabel: "Base",
+        connectorId: connector?.id,
+        switchChainAsync,
+      });
 
       let lastHash: `0x${string}` | undefined;
-      for (const tx of bridge.transactions) {
-        const hash = await sendTransactionAsync({
-          to: tx.to,
-          data: tx.data,
-          value: BigInt(tx.value || "0"),
-          chainId: SUPPORTED_CHAINS.BASE.id,
-        });
+      for (const [idx, tx] of bridge.transactions.entries()) {
+        setBridgeStep(
+          `3/4 Confirme na sua carteira (${idx + 1}/${bridge.transactions.length}): ${tx.description}`,
+        );
+        const hash = await withTimeout(
+          sendTransactionAsync({
+            to: tx.to,
+            data: tx.data,
+            value: BigInt(tx.value || "0"),
+            chainId: SUPPORTED_CHAINS.BASE.id,
+          }),
+          90_000,
+          "Tempo esgotado aguardando confirmação na carteira. Abra o app/extensão da sua carteira para assinar ou reconecte-a no topo.",
+        );
         lastHash = hash;
+        setBridgeTxHash(hash);
         if (basePublicClient) {
-          await basePublicClient.waitForTransactionReceipt({ hash });
+          setBridgeStep(
+            `4/4 Aguardando confirmação na rede Base (${idx + 1}/${bridge.transactions.length})...`,
+          );
+          await basePublicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
         }
       }
 
@@ -193,6 +212,7 @@ export function DepositTab({
       setError(err instanceof Error ? err.message : "Erro ao enviar bridge da rede Base.");
     } finally {
       setBridgeBusy(false);
+      setBridgeStep(null);
     }
   }
 
@@ -224,20 +244,28 @@ export function DepositTab({
     try {
       let txHash: `0x${string}`;
       if (isConnected && !safeMultisigClient.isDemoSafe(safeAddress)) {
-        if (currentChainId !== SUPPORTED_CHAINS.BNB.id) {
-          await switchChainAsync({ chainId: SUPPORTED_CHAINS.BNB.id });
-        }
+        await ensureWalletChain({
+          currentChainId,
+          targetChainId: SUPPORTED_CHAINS.BNB.id,
+          targetChainLabel: "BNB Smart Chain",
+          connectorId: connector?.id,
+          switchChainAsync,
+        });
         // Transferência real ERC-20 de USDC na BNB Chain (18 decimais!) para o endereço da Safe
         const rawAmount = toRawUnits(parsedAmount, BNB_USDC_TOKEN.decimals);
-        txHash = await writeContractAsync({
-          address: BNB_USDC_TOKEN.address,
-          abi: erc20Abi,
-          functionName: "transfer",
-          args: [safeAddress, rawAmount],
-          chainId: SUPPORTED_CHAINS.BNB.id,
-        });
+        txHash = await withTimeout(
+          writeContractAsync({
+            address: BNB_USDC_TOKEN.address,
+            abi: erc20Abi,
+            functionName: "transfer",
+            args: [safeAddress, rawAmount],
+            chainId: SUPPORTED_CHAINS.BNB.id,
+          }),
+          90_000,
+          "Tempo esgotado aguardando confirmação na carteira para transferir USDC para a Safe.",
+        );
         if (bscPublicClient) {
-          await bscPublicClient.waitForTransactionReceipt({ hash: txHash });
+          await bscPublicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 });
         }
       } else {
         // Hash determinístico simulado para testes locais
@@ -436,6 +464,12 @@ export function DepositTab({
             {bridgeBusy ? "Enviando Bridge..." : "2. Trazer p/ BNB Chain (OKX)"}
           </button>
         </form>
+
+        {bridgeBusy && bridgeStep && (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2.5 text-xs text-sky-200">
+            {bridgeStep}
+          </div>
+        )}
 
         {bridgeTxHash && (
           <div className="text-xs text-sky-300 flex items-center gap-2">

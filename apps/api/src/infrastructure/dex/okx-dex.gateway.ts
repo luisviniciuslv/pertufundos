@@ -655,6 +655,7 @@ export class OkxDexGateway implements IDexGateway {
     return fetch(`${this.config.OKX_BASE_URL}${fullPath}`, {
       method,
       headers,
+      signal: AbortSignal.timeout(15_000),
     });
   }
 

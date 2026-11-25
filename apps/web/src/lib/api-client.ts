@@ -69,15 +69,24 @@ export const authTokenStore = {
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const activeSession = authTokenStore.loadForWallet();
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(activeSession ? { Authorization: `Bearer ${activeSession.token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(25_000),
+      headers: {
+        "Content-Type": "application/json",
+        ...(activeSession ? { Authorization: `Bearer ${activeSession.token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+      cache: "no-store",
+    });
+  } catch (err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("O servidor demorou mais de 25s para responder. Tente novamente.");
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     if (res.status === 401) {
