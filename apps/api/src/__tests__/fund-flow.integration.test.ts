@@ -425,4 +425,41 @@ describe("Pertufundos API End-to-End Cryptographic Auth & Fund Flow", () => {
 
     await prodRepo.close();
   });
+
+  it("prepares Base -> BNB Chain USDC bridge bundle only for authenticated wallet owner", async () => {
+    const token1 = await signInAccount(ACCOUNT_1);
+
+    const impersonatedRes = await app.request("/api/v1/deposits/bridge-base-to-bsc", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token1}`,
+      },
+      body: JSON.stringify({
+        fromAddress: ACCOUNT_2.address,
+        amountUsdc: 150,
+      }),
+    });
+    expect(impersonatedRes.status).toBe(403);
+
+    const bridgeRes = await app.request("/api/v1/deposits/bridge-base-to-bsc", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token1}`,
+      },
+      body: JSON.stringify({
+        fromAddress: ACCOUNT_1.address,
+        amountUsdc: 150,
+        slippagePercent: 1.0,
+      }),
+    });
+    expect(bridgeRes.status).toBe(200);
+    const { bridge } = await bridgeRes.json();
+    expect(bridge.chainId).toBe(8453);
+    expect(bridge.destinationChainId).toBe(56);
+    expect(bridge.fromAddress).toBe(ACCOUNT_1.address.toLowerCase());
+    expect(bridge.recipientBscAddress).toBe(ACCOUNT_1.address.toLowerCase());
+    expect(bridge.transactions.length).toBeGreaterThanOrEqual(2);
+  });
 });

@@ -1,6 +1,7 @@
 import type {
   AuthChallengeResponse,
   AuthSessionResponse,
+  BaseBridgeBundle,
   CatalogAsset,
   CastVoteInput,
   ConfirmExecutionInput,
@@ -13,6 +14,7 @@ import type {
   MemberTaxSummary,
   NavSnapshot,
   PortfolioSummary,
+  PrepareBaseBridgeInput,
   PreparedSafeBatch,
   Proposal,
   RecordDepositInput,
@@ -135,6 +137,12 @@ export const fundApi = {
 
   recordDeposit: (input: RecordDepositInput) =>
     apiRequest<{ entry: LedgerEntry; idempotentReplay: boolean }>("/deposits/record", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  prepareBaseBridge: (input: PrepareBaseBridgeInput) =>
+    apiRequest<{ bridge: BaseBridgeBundle }>("/deposits/bridge-base-to-bsc", {
       method: "POST",
       body: JSON.stringify(input),
     }),

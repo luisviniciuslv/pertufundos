@@ -1,13 +1,16 @@
 import {
+  BASE_USDC_TOKEN,
   castVoteSchema,
   confirmExecutionSchema,
   createRedemptionSchema,
   createTradeProposalSchema,
   evmAddressSchema,
   linkSafeTxSchema,
+  prepareBaseBridgeSchema,
   recordDepositSchema,
   registerMemberSchema,
   requestAuthChallengeSchema,
+  SUPPORTED_CHAINS,
   trackCustomAssetSchema,
   verifyAuthSignatureSchema,
   type EvmAddress,
@@ -231,6 +234,28 @@ export function createHttpApp(container: AppContainer): Hono {
       alreadyInOnChainBalance: !isDemoMode,
     });
     return c.json(result, result.idempotentReplay ? 200 : 201);
+  });
+
+  api.post("/deposits/bridge-base-to-bsc", async (c) => {
+    const authWallet = requireAuthWallet(c);
+    const body = prepareBaseBridgeSchema.parse(await c.req.json());
+    assertCallerMatchesWallet(authWallet, body.fromAddress);
+
+    const bridge = await container.dexGateway.buildCrossChainBaseToBscBridgeTransactions({
+      fromBaseAddress: authWallet,
+      recipientBscAddress: authWallet,
+      usdcAmount: body.amountUsdc,
+      slippagePercent: body.slippagePercent,
+      getBaseAllowance: (spenderAddress) =>
+        container.vaultReader.readAllowance({
+          tokenAddress: BASE_USDC_TOKEN.address,
+          ownerAddress: authWallet,
+          spenderAddress,
+          chainId: SUPPORTED_CHAINS.BASE.id,
+        }),
+    });
+
+    return c.json({ bridge });
   });
 
   // --- Webhook Oficial Alchemy (Address Activity — Autenticado via X-Alchemy-Signature) ---

@@ -1,17 +1,38 @@
 "use client";
 
 import {
+  BASE_USDC_TOKEN,
   BNB_USDC_TOKEN,
   buildExplorerTxUrl,
+  fromRawUnits,
+  P2P_ME_CONFIG,
+  SUPPORTED_CHAINS,
   toRawUnits,
   type EvmAddress,
   type LedgerEntry,
   type MemberPosition,
 } from "@pertufundos/shared";
-import { ArrowDownLeft, ExternalLink, PlusCircle, UserPlus } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowRightLeft,
+  Check,
+  Copy,
+  ExternalLink,
+  PlusCircle,
+  RefreshCw,
+  UserPlus,
+} from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { erc20Abi } from "viem";
-import { useAccount, useWriteContract } from "wagmi";
+import {
+  useAccount,
+  useBalance,
+  usePublicClient,
+  useReadContract,
+  useSendTransaction,
+  useSwitchChain,
+  useWriteContract,
+} from "wagmi";
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
@@ -32,18 +53,133 @@ export function DepositTab({
   ledgerEntries,
   onRefresh,
 }: DepositTabProps) {
-  const { isConnected } = useAccount();
+  const { address: connectedAddress, chainId: currentChainId, isConnected } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
+  const basePublicClient = usePublicClient({ chainId: SUPPORTED_CHAINS.BASE.id });
+  const bscPublicClient = usePublicClient({ chainId: SUPPORTED_CHAINS.BNB.id });
+
+  const walletForBalances = activeWallet ?? (connectedAddress?.toLowerCase() as EvmAddress | undefined);
+  const { data: rawBaseUsdc, refetch: refetchBaseUsdc } = useReadContract({
+    address: BASE_USDC_TOKEN.address,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: walletForBalances ? [walletForBalances] : undefined,
+    chainId: SUPPORTED_CHAINS.BASE.id,
+    query: { enabled: Boolean(walletForBalances) },
+  });
+  const { data: rawBscUsdc, refetch: refetchBscUsdc } = useReadContract({
+    address: BNB_USDC_TOKEN.address,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: walletForBalances ? [walletForBalances] : undefined,
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    query: { enabled: Boolean(walletForBalances) },
+  });
+  const { data: baseEthBalance } = useBalance({
+    address: walletForBalances,
+    chainId: SUPPORTED_CHAINS.BASE.id,
+    query: { enabled: Boolean(walletForBalances) },
+  });
+
+  const baseUsdcBalance = rawBaseUsdc !== undefined ? fromRawUnits(rawBaseUsdc, BASE_USDC_TOKEN.decimals) : 0;
+  const bscUsdcBalance = rawBscUsdc !== undefined ? fromRawUnits(rawBscUsdc, BNB_USDC_TOKEN.decimals) : 0;
+  const baseEthHuman = baseEthBalance ? Number(baseEthBalance.formatted) : 0;
 
   const [amountUsd, setAmountUsd] = useState("500");
+  const [bridgeAmountUsd, setBridgeAmountUsd] = useState("100");
+  const [bridgeTxHash, setBridgeTxHash] = useState<string | null>(null);
+  const [copiedWallet, setCopiedWallet] = useState(false);
   const [newNickname, setNewNickname] = useState("");
   const [newWallet, setNewWallet] = useState("");
   const [busy, setBusy] = useState(false);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const parsedAmount = Number(amountUsd) || 0;
   const estimatedNewShares = navPerShareUsd > 0 ? parsedAmount / navPerShareUsd : 0;
+
+  async function refreshWalletBalances() {
+    await Promise.all([refetchBaseUsdc(), refetchBscUsdc()]);
+  }
+
+  async function handleCopyWallet() {
+    if (!walletForBalances) return;
+    try {
+      await navigator.clipboard.writeText(walletForBalances);
+      setCopiedWallet(true);
+      setTimeout(() => setCopiedWallet(false), 2000);
+    } catch {
+      // Ignora caso clipboard não esteja disponível
+    }
+  }
+
+  async function handleBridgeBaseToBsc(e: FormEvent) {
+    e.preventDefault();
+    if (!activeWallet) {
+      setError("Conecte sua carteira e assine o login gratuito no topo da página primeiro.");
+      return;
+    }
+
+    const amount = Number(bridgeAmountUsd) || 0;
+    if (amount <= 0) {
+      setError("Informe um valor válido em USDC para trazer da rede Base.");
+      return;
+    }
+
+    setBridgeBusy(true);
+    setError(null);
+    setFeedback(null);
+    setBridgeTxHash(null);
+
+    try {
+      const { bridge } = await fundApi.prepareBaseBridge({
+        fromAddress: activeWallet,
+        amountUsdc: amount,
+        slippagePercent: 1.0,
+      });
+
+      if (!isConnected || safeMultisigClient.isDemoSafe(safeAddress)) {
+        setFeedback(
+          `[SIMULAÇÃO] Rota OKX preparada para ${amount.toFixed(2)} USDC (Base -> BNB Chain, ${bridge.transactions.length} transações).`,
+        );
+        return;
+      }
+
+      if (currentChainId !== SUPPORTED_CHAINS.BASE.id) {
+        await switchChainAsync({ chainId: SUPPORTED_CHAINS.BASE.id });
+      }
+
+      let lastHash: `0x${string}` | undefined;
+      for (const tx of bridge.transactions) {
+        const hash = await sendTransactionAsync({
+          to: tx.to,
+          data: tx.data,
+          value: BigInt(tx.value || "0"),
+          chainId: SUPPORTED_CHAINS.BASE.id,
+        });
+        lastHash = hash;
+        if (basePublicClient) {
+          await basePublicClient.waitForTransactionReceipt({ hash });
+        }
+      }
+
+      if (lastHash) {
+        setBridgeTxHash(lastHash);
+      }
+      await refreshWalletBalances();
+      setAmountUsd(String(Number(bridge.expectedBscUsdc.toFixed(2))));
+      setFeedback(
+        `Bridge Base -> BNB Chain enviada! Aguarde ~1–2 minutos para ~${bridge.expectedBscUsdc.toFixed(2)} USDC caírem na sua BNB Chain e depois clique em "Transferir USDC para a Safe".`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar bridge da rede Base.");
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
 
   async function handleDeposit(e: FormEvent) {
     e.preventDefault();
@@ -56,8 +192,11 @@ export function DepositTab({
     setFeedback(null);
 
     try {
-      let txHash: string;
+      let txHash: `0x${string}`;
       if (isConnected && !safeMultisigClient.isDemoSafe(safeAddress)) {
+        if (currentChainId !== SUPPORTED_CHAINS.BNB.id) {
+          await switchChainAsync({ chainId: SUPPORTED_CHAINS.BNB.id });
+        }
         // Transferência real ERC-20 de USDC na BNB Chain (18 decimais!) para o endereço da Safe
         const rawAmount = toRawUnits(parsedAmount, BNB_USDC_TOKEN.decimals);
         txHash = await writeContractAsync({
@@ -65,7 +204,11 @@ export function DepositTab({
           abi: erc20Abi,
           functionName: "transfer",
           args: [safeAddress, rawAmount],
+          chainId: SUPPORTED_CHAINS.BNB.id,
         });
+        if (bscPublicClient) {
+          await bscPublicClient.waitForTransactionReceipt({ hash: txHash });
+        }
       } else {
         // Hash determinístico simulado para testes locais
         const rand = Array.from({ length: 64 }, () =>
@@ -80,6 +223,7 @@ export function DepositTab({
         txHash,
       });
 
+      await refreshWalletBalances();
       setFeedback(
         `Aporte registrado! +${formatShares(res.entry.sharesDelta)} cotas emitidas ao NAV de US$ ${res.entry.navAtExecutionUsd.toFixed(4)}.`,
       );
@@ -126,6 +270,151 @@ export function DepositTab({
         </div>
       )}
 
+      <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-white font-semibold">
+            <ArrowRightLeft className="h-5 w-5 text-sky-400" />
+            <h2>Aportar via Pix (P2P.me ou Picnic na Base &rarr; BNB Chain)</h2>
+          </div>
+          {walletForBalances && (
+            <button
+              type="button"
+              onClick={() => void refreshWalletBalances()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300 hover:text-white transition"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Atualizar Saldos
+            </button>
+          )}
+        </div>
+
+        <p className="text-xs text-slate-300 leading-relaxed">
+          Sem CNPJ: compre <strong>USDC na rede Base</strong> usando Pix no{" "}
+          <a
+            href={P2P_ME_CONFIG.appUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sky-400 hover:underline font-medium"
+          >
+            P2P.me
+          </a>{" "}
+          ou envie da sua conta <strong>Picnic (rede Base)</strong> para o seu endereço conectado
+          abaixo. Depois, traga para a <strong>BNB Chain</strong> em 1 clique via{" "}
+          <strong>OKX Bridge</strong> e deposite na Safe no seu nome!
+        </p>
+
+        {walletForBalances && (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-slate-400">Sua Carteira (Base &amp; BSC)</p>
+                <p className="font-mono text-slate-200 truncate">{walletForBalances}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCopyWallet()}
+                className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 hover:bg-slate-700 inline-flex items-center gap-1"
+              >
+                {copiedWallet ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    Copiado
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    Copiar
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+              <p className="text-slate-400">Saldo na Rede Base (para Bridge)</p>
+              <p className="font-mono text-sm font-semibold text-sky-300">
+                {baseUsdcBalance.toFixed(2)} USDC
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Gás Base: {baseEthHuman.toFixed(5)} ETH
+                {baseEthHuman < 0.00005 && " (deixe ~US$ 0,05 em ETH na Base)"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+              <p className="text-slate-400">Saldo na BNB Chain (pronto p/ Safe)</p>
+              <p className="font-mono text-sm font-semibold text-emerald-300">
+                {bscUsdcBalance.toFixed(2)} USDC
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Pronto para transferir no card abaixo
+              </p>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleBridgeBaseToBsc} className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[200px]">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-300">
+                Valor para Bridge (Base &rarr; BNB Chain)
+              </label>
+              {baseUsdcBalance > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBridgeAmountUsd(String(Math.floor(baseUsdcBalance * 100) / 100))}
+                  className="text-[11px] text-sky-400 hover:underline"
+                >
+                  Usar saldo Base ({baseUsdcBalance.toFixed(2)})
+                </button>
+              )}
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              min="1"
+              required
+              value={bridgeAmountUsd}
+              onChange={(e) => setBridgeAmountUsd(e.target.value)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-500 focus:outline-none"
+            />
+          </div>
+
+          <a
+            href={P2P_ME_CONFIG.appUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-700 transition"
+          >
+            1. Comprar via Pix (P2P.me)
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+
+          <button
+            type="submit"
+            disabled={bridgeBusy}
+            className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50 transition"
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            {bridgeBusy ? "Enviando Bridge..." : "2. Trazer p/ BNB Chain (OKX)"}
+          </button>
+        </form>
+
+        {bridgeTxHash && (
+          <div className="text-xs text-sky-300 flex items-center gap-2">
+            <span>Transação enviada na Base:</span>
+            <a
+              href={buildExplorerTxUrl(bridgeTxHash, SUPPORTED_CHAINS.BASE.id)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-mono underline hover:text-sky-200"
+            >
+              {shortenAddress(bridgeTxHash)}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Formulário de Aporte em USDC */}
         <form
@@ -144,9 +433,20 @@ export function DepositTab({
           </p>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Valor do Aporte (USDC)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-slate-300">
+                Valor do Aporte (USDC na BNB Chain)
+              </label>
+              {bscUsdcBalance > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAmountUsd(String(Math.floor(bscUsdcBalance * 100) / 100))}
+                  className="text-[11px] text-emerald-400 hover:underline"
+                >
+                  Usar máximo ({bscUsdcBalance.toFixed(2)})
+                </button>
+              )}
+            </div>
             <input
               type="number"
               step="0.01"

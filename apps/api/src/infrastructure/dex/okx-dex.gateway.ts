@@ -7,6 +7,7 @@ import {
   inferTokenCategory,
   SUPPORTED_CHAINS,
   toRawUnits,
+  type BaseBridgeBundle,
   type DexQuoteSummary,
   type EvmAddress,
   type SafeMetaTx,
@@ -345,6 +346,136 @@ export class OkxDexGateway implements IDexGateway {
         description: `Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC -> Base (${params.recipientBaseAddress})`,
       },
     ];
+  }
+
+  async buildCrossChainBaseToBscBridgeTransactions(params: {
+    fromBaseAddress: EvmAddress;
+    recipientBscAddress: EvmAddress;
+    usdcAmount: number;
+    slippagePercent: number;
+    getBaseAllowance: (spenderAddress: EvmAddress) => Promise<bigint>;
+  }): Promise<BaseBridgeBundle> {
+    const rawBaseUsdcAmount = toRawUnits(params.usdcAmount, BASE_USDC_TOKEN.decimals);
+
+    if (!this.hasLiveCredentials) {
+      const approveCalldata = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [SIMULATED_OKX_ROUTER, rawBaseUsdcAmount],
+      });
+      const transferSimCalldata = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [params.recipientBscAddress, rawBaseUsdcAmount],
+      });
+
+      return {
+        chainId: SUPPORTED_CHAINS.BASE.id,
+        destinationChainId: SUPPORTED_CHAINS.BNB.id,
+        fromAddress: params.fromBaseAddress,
+        recipientBscAddress: params.recipientBscAddress,
+        amountUsdc: params.usdcAmount,
+        expectedBscUsdc: params.usdcAmount,
+        source: "SIMULATED",
+        transactions: [
+          {
+            to: BASE_USDC_TOKEN.address,
+            value: "0",
+            data: approveCalldata,
+            operation: 0,
+            description: `[SIMULAÇÃO] Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (Base) para Bridge OKX`,
+          },
+          {
+            to: SIMULATED_OKX_ROUTER,
+            value: "0",
+            data: transferSimCalldata,
+            operation: 0,
+            description: `[SIMULAÇÃO] Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC (Base -> BNB Chain)`,
+          },
+        ],
+      };
+    }
+
+    const transactions: SafeMetaTx[] = [];
+
+    const approveData = await this.requestOkx<{
+      data: `0x${string}`;
+      dexContractAddress: EvmAddress;
+    }>("GET", "/api/v6/dex/aggregator/approve-transaction", {
+      chainIndex: SUPPORTED_CHAINS.BASE.okxChainIndex,
+      tokenContractAddress: BASE_USDC_TOKEN.address,
+      approveAmount: rawBaseUsdcAmount.toString(),
+    });
+
+    const approveItem = approveData[0];
+    if (approveItem) {
+      const spender = approveItem.dexContractAddress.toLowerCase() as EvmAddress;
+      const currentAllowance = await params.getBaseAllowance(spender).catch(() => 0n);
+      if (currentAllowance < rawBaseUsdcAmount) {
+        transactions.push({
+          to: BASE_USDC_TOKEN.address,
+          value: "0",
+          data: approveItem.data,
+          operation: 0,
+          description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (Base) para o roteador OKX`,
+        });
+      }
+    }
+
+    const crossTx = await this.requestOkx<{
+      routerResult?: {
+        toTokenAmount?: string;
+      };
+      toTokenAmount?: string;
+      tx: {
+        to: EvmAddress;
+        data: `0x${string}`;
+        value: string;
+      };
+    }>("GET", "/api/v5/dex/cross-chain/build-tx", {
+      fromChainId: SUPPORTED_CHAINS.BASE.okxChainIndex,
+      toChainId: SUPPORTED_CHAINS.BNB.okxChainIndex,
+      fromTokenAddress: BASE_USDC_TOKEN.address,
+      toTokenAddress: BNB_USDC_TOKEN.address,
+      amount: rawBaseUsdcAmount.toString(),
+      slippage: String(params.slippagePercent / 100),
+      userWalletAddress: params.fromBaseAddress,
+      receiveAddress: params.recipientBscAddress,
+    });
+
+    const bridgeItem = crossTx[0];
+    if (!bridgeItem?.tx) {
+      throw new DomainError(
+        "OKX Cross-Chain Bridge não encontrou rota Base -> BNB Chain para este valor.",
+        502,
+        "OKX_BRIDGE_NO_ROUTE",
+      );
+    }
+
+    const rawExpectedTo = bridgeItem.routerResult?.toTokenAmount ?? bridgeItem.toTokenAmount;
+    const expectedBscUsdc = rawExpectedTo
+      ? fromRawUnits(rawExpectedTo, BNB_USDC_TOKEN.decimals)
+      : params.usdcAmount;
+
+    const bridgeRouter = bridgeItem.tx.to.toLowerCase() as EvmAddress;
+    transactions.push({
+      to: bridgeRouter,
+      value: bridgeItem.tx.value || "0",
+      data: bridgeItem.tx.data,
+      operation: 0,
+      description: `Bridge OKX Cross-Chain: US$ ${params.usdcAmount.toFixed(2)} USDC (Base) -> BNB Chain`,
+    });
+
+    return {
+      chainId: SUPPORTED_CHAINS.BASE.id,
+      destinationChainId: SUPPORTED_CHAINS.BNB.id,
+      fromAddress: params.fromBaseAddress,
+      recipientBscAddress: params.recipientBscAddress,
+      amountUsdc: params.usdcAmount,
+      expectedBscUsdc,
+      source: "OKX_LIVE",
+      transactions,
+    };
   }
 
   private buildSimulatedSwapBundle(

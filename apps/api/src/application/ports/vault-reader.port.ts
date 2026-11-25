@@ -36,5 +36,6 @@ export interface IVaultReader {
     tokenAddress: EvmAddress;
     ownerAddress: EvmAddress;
     spenderAddress: EvmAddress;
+    chainId?: number;
   }): Promise<bigint>;
 }

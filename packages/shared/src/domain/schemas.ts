@@ -35,6 +35,12 @@ export const recordDepositSchema = z.object({
     .regex(/^0x[a-fA-F0-9]{64}$/, "Hash de transação inválido"),
 });
 
+export const prepareBaseBridgeSchema = z.object({
+  fromAddress: evmAddressSchema,
+  amountUsdc: z.number().positive("Valor em USDC deve ser maior que zero").max(1_000_000),
+  slippagePercent: z.number().min(0.1).max(3.0).default(1.0),
+});
+
 export const createTradeProposalSchema = z.object({
   title: z.string().trim().min(4, "Título muito curto").max(120),
   description: z.string().trim().max(1000).default(""),
@@ -82,6 +88,7 @@ export const confirmExecutionSchema = z.object({
 
 export type RegisterMemberInput = z.infer<typeof registerMemberSchema>;
 export type RecordDepositInput = z.infer<typeof recordDepositSchema>;
+export type PrepareBaseBridgeInput = z.infer<typeof prepareBaseBridgeSchema>;
 export type CreateTradeProposalInput = z.infer<typeof createTradeProposalSchema>;
 export type CreateRedemptionInput = z.infer<typeof createRedemptionSchema>;
 export type CastVoteInput = z.infer<typeof castVoteSchema>;

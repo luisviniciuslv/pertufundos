@@ -3,12 +3,13 @@ import {
   BNB_VAULT_TOKENS,
   fromRawUnits,
   ONDO_STOCK_TOKENS,
+  SUPPORTED_CHAINS,
   toRawUnits,
   type EvmAddress,
   type TokenMetadata,
 } from "@pertufundos/shared";
 import { createPublicClient, erc20Abi, formatUnits, getAddress, http, parseAbi, parseEventLogs } from "viem";
-import { bsc } from "viem/chains";
+import { base, bsc } from "viem/chains";
 import type { AppConfig } from "../../config/env.js";
 import { DomainError, GuardrailError } from "../../domain/errors.js";
 import type { IFundRepository } from "../../application/ports/fund-repository.port.js";
@@ -40,6 +41,7 @@ const safeContractAbi = parseAbi([
 
 export class ViemVaultReader implements IVaultReader {
   private readonly publicClient;
+  private readonly basePublicClient;
 
   constructor(
     private readonly config: AppConfig,
@@ -48,6 +50,10 @@ export class ViemVaultReader implements IVaultReader {
     this.publicClient = createPublicClient({
       chain: bsc,
       transport: http(config.BSC_RPC_URL, { timeout: 10_000 }),
+    });
+    this.basePublicClient = createPublicClient({
+      chain: base,
+      transport: http(config.BASE_RPC_URL, { timeout: 10_000 }),
     });
   }
 
@@ -234,12 +240,16 @@ export class ViemVaultReader implements IVaultReader {
     tokenAddress: EvmAddress;
     ownerAddress: EvmAddress;
     spenderAddress: EvmAddress;
+    chainId?: number;
   }): Promise<bigint> {
     if (this.isDemoSafe(params.ownerAddress)) {
       return 0n;
     }
 
-    return this.publicClient.readContract({
+    const client =
+      params.chainId === SUPPORTED_CHAINS.BASE.id ? this.basePublicClient : this.publicClient;
+
+    return client.readContract({
       address: toChecksumAddress(params.tokenAddress),
       abi: erc20Abi,
       functionName: "allowance",

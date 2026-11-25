@@ -1,4 +1,10 @@
-import type { DexQuoteSummary, EvmAddress, SafeMetaTx, TokenMetadata } from "@pertufundos/shared";
+import type {
+  BaseBridgeBundle,
+  DexQuoteSummary,
+  EvmAddress,
+  SafeMetaTx,
+  TokenMetadata,
+} from "@pertufundos/shared";
 
 export interface TokenPriceResult {
   readonly unitPriceUsd: number;
@@ -34,4 +40,13 @@ export interface IDexGateway {
     usdcAmount: number;
     slippagePercent: number;
   }): Promise<SafeMetaTx[]>;
+
+  /** Monta transações Cross-Chain (OKX DEX v5) para trazer USDC da Base -> carteira pessoal na BNB Chain */
+  buildCrossChainBaseToBscBridgeTransactions(params: {
+    fromBaseAddress: EvmAddress;
+    recipientBscAddress: EvmAddress;
+    usdcAmount: number;
+    slippagePercent: number;
+    getBaseAllowance: (spenderAddress: EvmAddress) => Promise<bigint>;
+  }): Promise<BaseBridgeBundle>;
 }

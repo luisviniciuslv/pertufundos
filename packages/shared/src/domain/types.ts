@@ -134,6 +134,17 @@ export interface PreparedSafeBatch {
   readonly warnings: readonly string[];
 }
 
+export interface BaseBridgeBundle {
+  readonly chainId: number;
+  readonly destinationChainId: number;
+  readonly fromAddress: EvmAddress;
+  readonly recipientBscAddress: EvmAddress;
+  readonly amountUsdc: number;
+  readonly expectedBscUsdc: number;
+  readonly transactions: readonly SafeMetaTx[];
+  readonly source: "OKX_LIVE" | "SIMULATED";
+}
+
 export interface ProposalVote {
   readonly id: string;
   readonly proposalId: string;
