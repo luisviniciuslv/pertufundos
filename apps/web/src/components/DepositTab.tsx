@@ -207,8 +207,9 @@ export function DepositTab({
             } catch (simErr) {
               const rawMsg =
                 simErr instanceof Error ? simErr.message.split("\n")[0] : "reversão na simulação";
+              const neededEth = Number(valueWei) / 1e18;
               throw new Error(
-                `Simulação na rede Base detectou que a bridge iria falhar on-chain (${rawMsg}). Verifique se há ETH suficiente para a taxa da bridge + gás e se o valor em USDC é aceito pela rota.`,
+                `Simulação na rede Base detectou que a bridge iria falhar on-chain (${rawMsg}). [contrato: ${tx.to}, tx.value=${neededEth.toFixed(5)} ETH, seu ETH=${baseEthHuman.toFixed(5)} ETH]`,
               );
             }
           }

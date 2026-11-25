@@ -43,4 +43,15 @@ export interface IVaultReader {
     ownerAddress: EvmAddress;
     chainId?: number;
   }): Promise<bigint>;
+  readNativeBalance(params: {
+    ownerAddress: EvmAddress;
+    chainId?: number;
+  }): Promise<bigint>;
+  simulateTransaction(params: {
+    fromAddress: EvmAddress;
+    toAddress: EvmAddress;
+    data: `0x${string}`;
+    valueWei?: bigint;
+    chainId?: number;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
 }

@@ -272,6 +272,60 @@ export function createHttpApp(container: AppContainer): Hono {
         }),
     });
 
+    // Quando não há mais Approve pendente (apenas a transação final da bridge), pré-simula no RPC Alchemy da Base
+    if (
+      !container.vaultReader.isDemoSafe(container.config.SAFE_ADDRESS) &&
+      bridge.transactions.length === 1
+    ) {
+      const swapTx = bridge.transactions[0]!;
+      const valueWei = BigInt(swapTx.value || "0");
+      const [ethBalanceWei, routerAllowanceRaw] = await Promise.all([
+        container.vaultReader.readNativeBalance({
+          ownerAddress: authWallet,
+          chainId: SUPPORTED_CHAINS.BASE.id,
+        }),
+        container.vaultReader.readAllowance({
+          tokenAddress: BASE_USDC_TOKEN.address,
+          ownerAddress: authWallet,
+          spenderAddress: swapTx.to,
+          chainId: SUPPORTED_CHAINS.BASE.id,
+        }),
+      ]);
+
+      const neededEth = Number(valueWei) / 1e18;
+      const userEth = Number(ethBalanceWei) / 1e18;
+
+      if (ethBalanceWei <= valueWei) {
+        throw new GuardrailError(
+          `ETH insuficiente na Base para a taxa da bridge OKX: a rota exige ${neededEth.toFixed(5)} ETH de taxa cross-chain (+ gás), mas sua carteira possui ${userEth.toFixed(5)} ETH.`,
+        );
+      }
+
+      const sim = await container.vaultReader.simulateTransaction({
+        fromAddress: authWallet,
+        toAddress: swapTx.to,
+        data: swapTx.data,
+        valueWei,
+        chainId: SUPPORTED_CHAINS.BASE.id,
+      });
+
+      if (!sim.ok) {
+        const routerAllowanceUsdc = fromRawUnits(routerAllowanceRaw, BASE_USDC_TOKEN.decimals);
+        console.error("[Base Bridge Simulation Failed]", {
+          wallet: authWallet,
+          amountUsdc: body.amountUsdc,
+          to: swapTx.to,
+          valueWei: valueWei.toString(),
+          ethBalanceWei: ethBalanceWei.toString(),
+          routerAllowanceUsdc,
+          error: sim.error,
+        });
+        throw new GuardrailError(
+          `Simulação na rede Base falhou (${sim.error}). Diagnóstico: contrato ${swapTx.to} | taxa tx.value=${neededEth.toFixed(5)} ETH | seu ETH=${userEth.toFixed(5)} ETH | allowance(tx.to)=${routerAllowanceUsdc.toFixed(2)} USDC.`,
+        );
+      }
+    }
+
     return c.json({ bridge });
   });
 

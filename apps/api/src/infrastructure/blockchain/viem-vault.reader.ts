@@ -296,6 +296,50 @@ export class ViemVaultReader implements IVaultReader {
     });
   }
 
+  async readNativeBalance(params: {
+    ownerAddress: EvmAddress;
+    chainId?: number;
+  }): Promise<bigint> {
+    if (this.isDemoSafe(params.ownerAddress)) {
+      return 0n;
+    }
+
+    const client =
+      params.chainId === SUPPORTED_CHAINS.BASE.id ? this.basePublicClient : this.publicClient;
+
+    return client.getBalance({
+      address: toChecksumAddress(params.ownerAddress),
+    });
+  }
+
+  async simulateTransaction(params: {
+    fromAddress: EvmAddress;
+    toAddress: EvmAddress;
+    data: `0x${string}`;
+    valueWei?: bigint;
+    chainId?: number;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.isDemoSafe(params.fromAddress)) {
+      return { ok: true };
+    }
+
+    const client =
+      params.chainId === SUPPORTED_CHAINS.BASE.id ? this.basePublicClient : this.publicClient;
+
+    try {
+      await client.call({
+        account: toChecksumAddress(params.fromAddress),
+        to: toChecksumAddress(params.toAddress),
+        data: params.data,
+        value: params.valueWei ?? 0n,
+      });
+      return { ok: true };
+    } catch (err) {
+      const msg = (err instanceof Error ? err.message.split("\n")[0] : undefined) || String(err);
+      return { ok: false, error: msg };
+    }
+  }
+
   private async readOndoMultipliers(
     vaultTokens: readonly TokenMetadata[],
   ): Promise<Map<string, number>> {

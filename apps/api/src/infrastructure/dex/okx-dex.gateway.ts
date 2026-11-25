@@ -522,6 +522,17 @@ export class OkxDexGateway implements IDexGateway {
       : params.usdcAmount;
 
     const bridgeRouter = bridgeItem.tx.to.toLowerCase() as EvmAddress;
+    console.info("[OKX Cross-Chain Bridge]", {
+      fromChain: params.fromChain.id,
+      toChain: params.toChain.id,
+      amountUsdc: params.usdcAmount,
+      expectedOutAmount,
+      approveSpender: approveItem?.dexContractAddress ?? null,
+      txTo: bridgeRouter,
+      txValueWei: bridgeItem.tx.value || "0",
+      txSelector: bridgeItem.tx.data.slice(0, 10),
+    });
+
     transactions.push({
       to: bridgeRouter,
       value: bridgeItem.tx.value || "0",
