@@ -13,6 +13,8 @@ const envSchema = z.object({
   DATABASE_URL: z
     .string()
     .default("postgresql://pertufundos:pertufundos_secret@localhost:5432/pertufundos"),
+  DATABASE_SSL_CERT_BASE64: z.string().optional(),
+  DATABASE_SSL_CERT_PATH: z.string().optional(),
 
   API_PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
@@ -26,6 +28,10 @@ const envSchema = z.object({
   SAFE_ADDRESS: evmAddressSchema.default("0x1111111111111111111111111111111111111111"),
   SAFE_THRESHOLD: z.coerce.number().int().min(1).default(3),
   SAFE_API_KEY: z.string().optional(),
+  SEED_DEMO_ON_EMPTY: z
+    .string()
+    .default("false")
+    .transform((v) => v.toLowerCase() === "true"),
 
   BSC_RPC_URL: z.string().url().default(SUPPORTED_CHAINS.BNB.defaultRpcUrl),
   BASE_RPC_URL: z.string().url().default(SUPPORTED_CHAINS.BASE.defaultRpcUrl),

@@ -41,7 +41,11 @@ export function createContainer(
   const repository =
     overrides.repository ??
     (config.STORAGE_DRIVER === "postgres"
-      ? new PostgresFundRepository(config.DATABASE_URL)
+      ? new PostgresFundRepository({
+          connectionString: config.DATABASE_URL,
+          sslCertBase64: config.DATABASE_SSL_CERT_BASE64,
+          sslCertPath: config.DATABASE_SSL_CERT_PATH,
+        })
       : new SqliteFundRepository(config.SQLITE_PATH));
 
   const vaultReader = overrides.vaultReader ?? new ViemVaultReader(config, repository);

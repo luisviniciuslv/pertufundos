@@ -6,6 +6,12 @@ out/
 .env
 .env.*
 !.env.example
+sqsuarecloud
+squarecloud*.zip
+pertufundos-squarecloud.zip
+.squarecloud-db.json
+.squarecloud-app.json
+deploy-squarecloud/
 *.sqlite
 *.sqlite-*
 *.db

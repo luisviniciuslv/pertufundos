@@ -5,7 +5,11 @@ import { SqliteFundRepository } from "../infrastructure/persistence/sqlite/sqlit
 async function migrate(): Promise<void> {
   const config = loadConfig();
   if (config.STORAGE_DRIVER === "postgres") {
-    const repo = new PostgresFundRepository(config.DATABASE_URL);
+    const repo = new PostgresFundRepository({
+      connectionString: config.DATABASE_URL,
+      sslCertBase64: config.DATABASE_SSL_CERT_BASE64,
+      sslCertPath: config.DATABASE_SSL_CERT_PATH,
+    });
     await repo.runMigrations();
     await repo.close();
     console.log("✅ Migrations PostgreSQL aplicadas com sucesso.");

@@ -154,7 +154,23 @@ pnpm dev
 
 Abra **http://localhost:3000** no navegador! Conecte sua extensão (**Rabby** ou **MetaMask**), clique em **Assinar Login** (assinatura criptográfica EIP-191 sem custo de gás) e vincule seu apelido para operar como você mesmo. Para testar múltiplos votos localmente, basta alternar de conta (`Account 1` $\rightarrow$ `Account 2`) dentro da própria Rabby/MetaMask.
 
-### Opção B — Subir em Produção para o Grupo Usar 24/7 (Custo ~US\$ 0 a US\$ 5/mês)
+### Opção B — Subir em Produção para o Grupo Usar 24/7
+
+#### B1. Hospedagem em Container Único na Square Cloud (Recomendado — Tudo em 1 Lugar)
+O projeto já inclui o empacotador automático [scripts/build-squarecloud-bundle.mjs](file:///c:/Users/vinil/Documents/pertufundos/scripts/build-squarecloud-bundle.mjs), que junta Frontend (Next.js) + Backend (Hono API) no mesmo servidor na porta `80` ligado ao PostgreSQL gerenciado da Square Cloud:
+
+1. No painel/API da Square Cloud, crie um banco **PostgreSQL 18** (mínimo `1024 MB`) e guarde `DATABASE_URL` e `DATABASE_SSL_CERT_BASE64`.
+2. Gere o pacote pronto para upload (`pertufundos-squarecloud.zip`) com:
+   ```bash
+   node scripts/build-squarecloud-bundle.mjs
+   ```
+3. Faça upload do `.zip` (ou conecte o **Webhook nativo do GitHub** em *Settings → Deploys* na Square Cloud — o `server.mjs` na raiz já detecta deploy via Git e compila em modo econômico sequencial dentro de `1024 MB` de RAM!) e configure as variáveis de ambiente (`STORAGE_DRIVER=postgres`, `DATABASE_URL`, `DATABASE_SSL_CERT_BASE64`, `AUTH_SESSION_SECRET`, `CORS_ORIGIN`, `SAFE_ADDRESS`, `SAFE_THRESHOLD`, `OKX_*`, `ALCHEMY_WEBHOOK_SIGNING_KEY`).
+4. **Atualização Automática a cada `git push`:** Você pode escolher qualquer um dos 2 métodos:
+   * **Webhook Direto da Square Cloud (*Settings → Deploys → GitHub / Webhook*):** funciona direto na raiz do repositório usando o [squarecloud.app](file:///c:/Users/vinil/Documents/pertufundos/squarecloud.app) + [scripts/lowmem-build.mjs](file:///c:/Users/vinil/Documents/pertufundos/scripts/lowmem-build.mjs) (compila lá dentro em ~1 minuto dentro dos `1024 MB`).
+   * **GitHub Actions (opcional):** [.github/workflows/deploy-squarecloud.yml](file:///c:/Users/vinil/Documents/pertufundos/.github/workflows/deploy-squarecloud.yml) (roda `pnpm test` antes do deploy; configure `SQUARECLOUD_API_KEY` nos Secrets e `SQUARECLOUD_APP_ID` nas Variables do GitHub).
+5. Para ligar na Safe real do grupo (saindo do modo demonstração), altere `SAFE_ADDRESS`, `SAFE_THRESHOLD` e defina `SEED_DEMO_ON_EMPTY=false`.
+
+#### B2. Alternativa Gratuita Separada (Neon + Railway/Render + Vercel)
 
 1. **Banco de Dados PostgreSQL (Neon.tech ou Supabase — Plano Gratuito):**
    * Crie um banco Postgres gratuito no [Neon](https://neon.tech) e copie a `DATABASE_URL`.

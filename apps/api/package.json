@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.mkdirSync('dist/infrastructure/persistence/postgres',{recursive:true});fs.copyFileSync('src/infrastructure/persistence/postgres/schema.sql','dist/infrastructure/persistence/postgres/schema.sql');\"",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -14,18 +14,18 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
-    "@pertufundos/shared": "workspace:*",
+    "@pertufundos/shared": "file:../../packages/shared",
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
     "dotenv": "^16.4.7",
     "hono": "^4.7.4",
     "pg": "^8.13.3",
+    "typescript": "^5.8.2",
     "viem": "^2.23.11",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
-    "@types/pg": "^8.11.11",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2",
     "vitest": "^3.0.8"
   }
 }

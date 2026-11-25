@@ -4,14 +4,20 @@
   "private": true,
   "description": "Fundo Coletivo Web3 de Ações Tokenizadas (Safe Multisig + OKX DEX + Ondo Stocks + P2P.me)",
   "packageManager": "pnpm@12.9.1",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "dev": "pnpm --parallel -r dev",
     "dev:api": "pnpm --filter @pertufundos/api dev",
     "dev:web": "pnpm --filter @pertufundos/web dev",
     "build": "pnpm --filter @pertufundos/shared build && pnpm --filter @pertufundos/api build && pnpm --filter @pertufundos/web build",
+    "build:lowmem": "node scripts/lowmem-build.mjs",
+    "start": "node server.mjs",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "db:migrate": "pnpm --filter @pertufundos/api db:migrate",

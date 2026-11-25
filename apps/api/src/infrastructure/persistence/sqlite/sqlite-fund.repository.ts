@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type {
   EvmAddress,
   LedgerEntry,
@@ -34,10 +35,13 @@ import {
   type RawVoteRow,
 } from "../row-mappers.js";
 
+const require = createRequire(import.meta.url);
+
 export class SqliteFundRepository implements IFundRepository {
-  private readonly db: DatabaseSync;
+  private readonly db: DatabaseSyncType;
 
   constructor(dbFilePath: string) {
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
     if (dbFilePath !== ":memory:") {
       fs.mkdirSync(path.dirname(path.resolve(dbFilePath)), { recursive: true });
     }

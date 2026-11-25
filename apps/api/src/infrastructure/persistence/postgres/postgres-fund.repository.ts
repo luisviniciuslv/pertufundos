@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,11 +38,45 @@ import {
 
 const { Pool } = pg;
 
+export interface PostgresConnectionOptions {
+  readonly connectionString: string;
+  readonly sslCertBase64?: string;
+  readonly sslCertPath?: string;
+}
+
+function buildPostgresSslConfig(options: PostgresConnectionOptions): pg.PoolConfig["ssl"] {
+  let pem: string | undefined;
+  if (options.sslCertBase64) {
+    pem = Buffer.from(options.sslCertBase64, "base64").toString("utf8");
+  } else if (options.sslCertPath) {
+    pem = fsSync.readFileSync(options.sslCertPath, "utf8");
+  }
+
+  if (!pem) {
+    return undefined;
+  }
+
+  return {
+    ca: pem,
+    cert: pem,
+    key: pem,
+    rejectUnauthorized: true,
+  };
+}
+
 export class PostgresFundRepository implements IFundRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
+  constructor(connectionOrOptions: string | PostgresConnectionOptions) {
+    const options =
+      typeof connectionOrOptions === "string"
+        ? { connectionString: connectionOrOptions }
+        : connectionOrOptions;
+
+    this.pool = new Pool({
+      connectionString: options.connectionString,
+      ssl: buildPostgresSslConfig(options),
+    });
   }
 
   async runMigrations(): Promise<void> {
