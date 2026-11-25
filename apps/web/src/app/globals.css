@@ -8,4 +8,11 @@
 
 body {
   @apply bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -15%, rgba(16, 185, 129, 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 85% 0%, rgba(14, 165, 233, 0.08), transparent);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

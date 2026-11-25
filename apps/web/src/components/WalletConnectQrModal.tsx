@@ -20,6 +20,15 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
   }, []);
 
   useEffect(() => {
+    if (!uri) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [uri, onClose]);
+
+  useEffect(() => {
     if (!uri) {
       setQrDataUrl(null);
       setCopied(false);
@@ -72,10 +81,11 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
             </div>
             <div>
               <h2 className="text-sm font-bold text-white">Conectar pelo Celular</h2>
-              <p className="text-xs text-slate-400">WalletConnect v2</p>
+              <p className="text-xs text-slate-400">Escaneie com sua carteira</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Fechar modal"
             className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
@@ -102,6 +112,7 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
 
         <div className="mt-4 flex flex-col gap-2">
           <button
+            type="button"
             onClick={() => void handleCopy()}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700 transition"
           >

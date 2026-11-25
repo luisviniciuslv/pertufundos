@@ -4,9 +4,9 @@ import { Providers } from "@/components/Providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pertufundos — Clube Web3 de Ações Tokenizadas",
+  title: "Pertufundos — Clube Coletivo de Ações Tokenizadas",
   description:
-    "Cofre Multisig Safe + Ondo Tokenized Stocks via OKX DEX + Saque individual em Pix via P2P.me (Base)",
+    "Cofre compartilhado Safe Multisig + Ações dos EUA tokenizadas (Ondo) via OKX DEX + Saque individual em Pix via P2P.me",
 };
 
 export const dynamic = "force-dynamic";

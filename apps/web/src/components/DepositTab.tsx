@@ -20,6 +20,7 @@ import {
   ExternalLink,
   PlusCircle,
   RefreshCw,
+  ShieldCheck,
   UserPlus,
 } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
@@ -33,6 +34,7 @@ import {
   useSwitchChain,
   useWriteContract,
 } from "wagmi";
+import { InfoTip } from "@/components/InfoTip";
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
@@ -92,6 +94,7 @@ export function DepositTab({
   const [bridgeAmountUsd, setBridgeAmountUsd] = useState("100");
   const [bridgeTxHash, setBridgeTxHash] = useState<string | null>(null);
   const [copiedWallet, setCopiedWallet] = useState(false);
+  const [copiedSafe, setCopiedSafe] = useState(false);
   const [newNickname, setNewNickname] = useState("");
   const [newWallet, setNewWallet] = useState("");
   const [busy, setBusy] = useState(false);
@@ -103,6 +106,7 @@ export function DepositTab({
 
   const parsedAmount = Number(amountUsd) || 0;
   const estimatedNewShares = navPerShareUsd > 0 ? parsedAmount / navPerShareUsd : 0;
+  const isDemo = safeMultisigClient.isDemoSafe(safeAddress);
 
   async function refreshWalletBalances() {
     await Promise.all([refetchBaseUsdc(), refetchBscUsdc()]);
@@ -119,10 +123,20 @@ export function DepositTab({
     }
   }
 
+  async function handleCopySafe() {
+    try {
+      await navigator.clipboard.writeText(safeAddress);
+      setCopiedSafe(true);
+      setTimeout(() => setCopiedSafe(false), 2000);
+    } catch {
+      // Ignora caso clipboard não esteja disponível
+    }
+  }
+
   async function handleBridgeBaseToBsc(e: FormEvent) {
     e.preventDefault();
     if (!activeWallet) {
-      setError("Conecte sua carteira e assine o login gratuito no topo da página primeiro.");
+      setError("Conecte sua carteira e clique em 'Assinar Login' no topo da página primeiro.");
       return;
     }
 
@@ -132,7 +146,7 @@ export function DepositTab({
       return;
     }
 
-    if (isConnected && !safeMultisigClient.isDemoSafe(safeAddress)) {
+    if (isConnected && !isDemo) {
       if (rawBaseUsdc !== undefined && amount > baseUsdcBalance) {
         setError(
           `Saldo insuficiente na rede Base: você possui ${baseUsdcBalance.toFixed(2)} USDC na Base, mas tentou enviar ${amount.toFixed(2)} USDC.`,
@@ -163,7 +177,7 @@ export function DepositTab({
       if (bridgeAttemptRef.current !== attemptId) return;
 
       let activeBridge = initial.bridge;
-      if (!isConnected || safeMultisigClient.isDemoSafe(safeAddress)) {
+      if (!isConnected || isDemo) {
         setFeedback(
           `[SIMULAÇÃO] Rota OKX preparada para ${amount.toFixed(2)} USDC (Base -> BNB Chain, ${activeBridge.transactions.length} transações).`,
         );
@@ -280,7 +294,7 @@ export function DepositTab({
       await refreshWalletBalances();
       setAmountUsd(String(Number(activeBridge.expectedBscUsdc.toFixed(2))));
       setFeedback(
-        `Bridge Base -> BNB Chain confirmada na Base! Aguarde ~1–2 minutos para ~${activeBridge.expectedBscUsdc.toFixed(2)} USDC caírem na sua BNB Chain e depois clique em "Transferir USDC para a Safe".`,
+        `Bridge confirmada na Base! Aguarde cerca de 1–2 minutos para ~${activeBridge.expectedBscUsdc.toFixed(2)} USDC aparecerem na sua BNB Chain e depois clique em "Enviar USDC para a Safe".`,
       );
     } catch (err) {
       if (bridgeAttemptRef.current === attemptId) {
@@ -297,19 +311,14 @@ export function DepositTab({
   async function handleDeposit(e: FormEvent) {
     e.preventDefault();
     if (!activeWallet) {
-      setError("Conecte sua carteira e assine o login gratuito no topo da página primeiro.");
+      setError("Conecte sua carteira e clique em 'Assinar Login' no topo da página primeiro.");
       return;
     }
     if (parsedAmount <= 0) {
       setError("Informe um valor válido em USDC para depositar na Safe.");
       return;
     }
-    if (
-      isConnected &&
-      !safeMultisigClient.isDemoSafe(safeAddress) &&
-      rawBscUsdc !== undefined &&
-      parsedAmount > bscUsdcBalance
-    ) {
+    if (isConnected && !isDemo && rawBscUsdc !== undefined && parsedAmount > bscUsdcBalance) {
       setError(
         `Saldo insuficiente na BNB Chain: você possui ${bscUsdcBalance.toFixed(2)} USDC na BNB Chain, mas tentou transferir ${parsedAmount.toFixed(2)} USDC.`,
       );
@@ -321,7 +330,7 @@ export function DepositTab({
 
     try {
       let txHash: `0x${string}`;
-      if (isConnected && !safeMultisigClient.isDemoSafe(safeAddress)) {
+      if (isConnected && !isDemo) {
         await ensureWalletChain({
           currentChainId,
           targetChainId: SUPPORTED_CHAINS.BNB.id,
@@ -350,7 +359,6 @@ export function DepositTab({
           }
         }
       } else {
-        // Hash determinístico simulado para testes locais
         const rand = Array.from({ length: 64 }, () =>
           Math.floor(Math.random() * 16).toString(16),
         ).join("");
@@ -365,7 +373,7 @@ export function DepositTab({
 
       await refreshWalletBalances();
       setFeedback(
-        `Aporte registrado! +${formatShares(res.entry.sharesDelta)} cotas emitidas ao NAV de US$ ${res.entry.navAtExecutionUsd.toFixed(4)}.`,
+        `Aporte registrado com sucesso! Você recebeu +${formatShares(res.entry.sharesDelta)} cotas ao preço de US$ ${res.entry.navAtExecutionUsd.toFixed(4)} por cota.`,
       );
       await onRefresh();
     } catch (err) {
@@ -388,7 +396,7 @@ export function DepositTab({
       });
       setNewNickname("");
       setNewWallet("");
-      setFeedback(`Amigo ${member.nickname} cadastrado com sucesso no fundo!`);
+      setFeedback(`${member.nickname} foi cadastrado(a) no clube com sucesso!`);
       await onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao cadastrar participante.");
@@ -410,45 +418,78 @@ export function DepositTab({
         </div>
       )}
 
-      <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-white font-semibold">
-            <ArrowRightLeft className="h-5 w-5 text-sky-400" />
-            <h2>Aportar via Pix (P2P.me ou Picnic na Base &rarr; BNB Chain)</h2>
+      {/* Passo a passo visual do aporte */}
+      <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-white font-semibold">
+              <ArrowRightLeft className="h-5 w-5 text-sky-400" />
+              <h2>Como colocar dinheiro no clube (via Pix em 3 passos)</h2>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+              Não precisa usar corretora no CPF do grupo. Você transforma Reais (Pix) em{" "}
+              <strong>USDC na rede Base</strong>, traz esse USDC para a{" "}
+              <strong>BNB Chain</strong> em 1 clique aqui e deposita direto no cofre Safe.{" "}
+              <span className="text-sky-300">
+                (Já tem USDC na BNB Chain? Pule direto para o Passo 3 abaixo!)
+              </span>
+            </p>
           </div>
           {walletForBalances && (
             <button
               type="button"
               onClick={() => void refreshWalletBalances()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300 hover:text-white transition"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 transition"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              Atualizar Saldos
+              Atualizar meus saldos
             </button>
           )}
         </div>
 
-        <p className="text-xs text-slate-300 leading-relaxed">
-          Sem CNPJ: compre <strong>USDC na rede Base</strong> usando Pix no{" "}
-          <a
-            href={P2P_ME_CONFIG.appUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sky-400 hover:underline font-medium"
-          >
-            P2P.me
-          </a>{" "}
-          ou envie da sua conta <strong>Picnic (rede Base)</strong> para o seu endereço conectado
-          abaixo. Depois, traga para a <strong>BNB Chain</strong> em 1 clique via{" "}
-          <strong>OKX Bridge</strong> e deposite na Safe no seu nome!
-        </p>
+        {/* Mini mapa dos 3 passos */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3.5 space-y-1">
+            <div className="font-semibold text-sky-300">Passo 1 • Comprar USDC via Pix</div>
+            <p className="text-slate-400 leading-relaxed">
+              Compre <strong>USDC na rede Base</strong> pelo{" "}
+              <a
+                href={P2P_ME_CONFIG.appUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sky-300 underline"
+              >
+                P2P.me
+              </a>{" "}
+              ou envie da sua conta <strong>Picnic (rede Base)</strong> para o seu endereço ao lado.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3.5 space-y-1">
+            <div className="font-semibold text-sky-300">Passo 2 • Trazer para BNB Chain</div>
+            <p className="text-slate-400 leading-relaxed">
+              O cofre do clube opera na BNB Chain (taxas de centavos). Use o botão{" "}
+              <strong>Trazer p/ BNB Chain</strong> abaixo para mover seus USDC entre as duas redes.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3.5 space-y-1">
+            <div className="font-semibold text-emerald-300">Passo 3 • Depositar na Safe</div>
+            <p className="text-slate-400 leading-relaxed">
+              Com o USDC na BNB Chain, envie para o cofre no card{" "}
+              <strong>Enviar USDC para a Safe</strong>. Suas cotas são emitidas na hora!
+            </p>
+          </div>
+        </div>
 
-        {walletForBalances && (
+        {/* Cartões de saldo da carteira conectada */}
+        {walletForBalances ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3 flex items-center justify-between gap-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/85 p-3.5 flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-slate-400">Sua Carteira (Base &amp; BSC)</p>
-                <p className="font-mono text-slate-200 truncate">{walletForBalances}</p>
+                <p className="text-slate-400 inline-flex items-center gap-1">
+                  Seu Endereço (Base e BNB)
+                  <InfoTip text="Seu endereço 0x... é idêntico na rede Base e na BNB Smart Chain." />
+                </p>
+                <p className="font-mono text-slate-100 truncate mt-0.5">{walletForBalances}</p>
               </div>
               <button
                 type="button"
@@ -469,26 +510,34 @@ export function DepositTab({
               </button>
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <p className="text-slate-400">Saldo na Rede Base (para Bridge)</p>
-              <p className="font-mono text-sm font-semibold text-sky-300">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/85 p-3.5">
+              <p className="text-slate-400">Saldo na Rede Base (para trazer)</p>
+              <p className="font-mono text-base font-semibold text-sky-300 mt-0.5 tabular-nums">
                 {baseUsdcBalance.toFixed(2)} USDC
               </p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Gás Base: {baseEthHuman.toFixed(5)} ETH
-                {baseEthHuman < 0.0003 && " (deixe ~US$ 0,50–1,50 em ETH na Base para taxa + gás da bridge)"}
+              <p className="text-[11px] text-slate-400 mt-1">
+                Taxa de gás (ETH na Base):{" "}
+                <span className={baseEthHuman < 0.0003 ? "text-amber-300" : "text-emerald-300"}>
+                  {baseEthHuman.toFixed(5)} ETH
+                </span>
+                {baseEthHuman < 0.0003 && " — deixe ~US$ 1 em ETH na Base para a bridge"}
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/85 p-3.5">
               <p className="text-slate-400">Saldo na BNB Chain (pronto p/ Safe)</p>
-              <p className="font-mono text-sm font-semibold text-emerald-300">
+              <p className="font-mono text-base font-semibold text-emerald-300 mt-0.5 tabular-nums">
                 {bscUsdcBalance.toFixed(2)} USDC
               </p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Pronto para transferir no card abaixo
+              <p className="text-[11px] text-slate-400 mt-1">
+                Pronto para depositar no Passo 3 abaixo
               </p>
             </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/60 p-4 text-xs text-slate-300">
+            Conecte sua carteira no topo da página para ver automaticamente seus saldos de USDC na
+            rede Base e na BNB Chain.
           </div>
         )}
 
@@ -496,7 +545,7 @@ export function DepositTab({
           <div className="flex-1 min-w-[200px]">
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-slate-300">
-                Valor para Bridge (Base &rarr; BNB Chain)
+                Quanto trazer da Base para a BNB Chain (USDC)
               </label>
               {baseUsdcBalance > 0 && (
                 <button
@@ -504,7 +553,7 @@ export function DepositTab({
                   onClick={() => setBridgeAmountUsd(String(Math.floor(baseUsdcBalance * 100) / 100))}
                   className="text-[11px] text-sky-400 hover:underline"
                 >
-                  Usar saldo Base ({baseUsdcBalance.toFixed(2)})
+                  Usar tudo ({baseUsdcBalance.toFixed(2)})
                 </button>
               )}
             </div>
@@ -518,11 +567,11 @@ export function DepositTab({
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-500 focus:outline-none"
             />
             {isConnected &&
-              !safeMultisigClient.isDemoSafe(safeAddress) &&
+              !isDemo &&
               rawBaseUsdc !== undefined &&
               (Number(bridgeAmountUsd) || 0) > baseUsdcBalance && (
                 <p className="mt-1 text-[11px] text-amber-300">
-                  Acima do seu saldo atual na Base ({baseUsdcBalance.toFixed(2)} USDC).
+                  Valor acima do seu saldo atual na Base ({baseUsdcBalance.toFixed(2)} USDC).
                 </p>
               )}
           </div>
@@ -543,7 +592,7 @@ export function DepositTab({
             className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50 transition"
           >
             <ArrowRightLeft className="h-4 w-4" />
-            {bridgeBusy ? "Enviando Bridge..." : "2. Trazer p/ BNB Chain (OKX)"}
+            {bridgeBusy ? "Fazendo Bridge..." : "2. Trazer p/ BNB Chain (OKX)"}
           </button>
         </form>
 
@@ -582,20 +631,38 @@ export function DepositTab({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Formulário de Aporte em USDC */}
+        {/* Passo 3: Formulário de Aporte em USDC */}
         <form
           onSubmit={handleDeposit}
-          className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 space-y-4"
+          className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6 space-y-4"
         >
-          <div className="flex items-center gap-2 text-white font-semibold">
-            <PlusCircle className="h-5 w-5 text-emerald-400" />
-            <h2>Novo Aporte em USDC (BNB Chain)</h2>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-white font-semibold">
+              <PlusCircle className="h-5 w-5 text-emerald-400" />
+              <h2>Passo 3 • Enviar USDC para a Safe (BNB Chain)</h2>
+            </div>
+            <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+              Gera Cotas
+            </span>
           </div>
+
           <p className="text-xs text-slate-400 leading-relaxed">
-            Em produção, basta transferir USDC da sua carteira pessoal para a Safe (
-            <code className="text-slate-300">{shortenAddress(safeAddress)}</code>): o{" "}
-            <strong>Alchemy Address Activity Webhook</strong> detecta o depósito e emite suas cotas
-            automaticamente pelo NAV vigente. Você também pode disparar a transferência por aqui:
+            Ao transferir <strong>USDC (BNB Chain)</strong> para o cofre do grupo, nosso monitor
+            automático (Alchemy) detecta o depósito e emite suas cotas na hora pelo preço vigente
+            (NAV). Você também pode transferir direto pela carteira para{" "}
+            <button
+              type="button"
+              onClick={() => void handleCopySafe()}
+              className="inline-flex items-center gap-1 font-mono text-slate-200 underline decoration-dotted hover:text-emerald-300"
+            >
+              {shortenAddress(safeAddress)}
+              {copiedSafe ? (
+                <Check className="h-3 w-3 text-emerald-400" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </button>
+            .
           </p>
 
           <div>
@@ -609,7 +676,7 @@ export function DepositTab({
                   onClick={() => setAmountUsd(String(Math.floor(bscUsdcBalance * 100) / 100))}
                   className="text-[11px] text-emerald-400 hover:underline"
                 >
-                  Usar máximo ({bscUsdcBalance.toFixed(2)})
+                  Usar saldo máximo ({bscUsdcBalance.toFixed(2)})
                 </button>
               )}
             </div>
@@ -624,14 +691,16 @@ export function DepositTab({
             />
           </div>
 
-          <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3.5 text-xs space-y-1">
+          <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-4 text-xs space-y-2">
             <div className="flex justify-between text-slate-400">
-              <span>NAV Vigente por Cota:</span>
-              <span className="font-mono text-slate-200">US$ {navPerShareUsd.toFixed(4)}</span>
+              <span>Preço Atual da Cota (NAV):</span>
+              <span className="font-mono text-slate-200 tabular-nums">
+                US$ {navPerShareUsd.toFixed(4)}
+              </span>
             </div>
             <div className="flex justify-between text-slate-400">
-              <span>Cotas Estimadas a Emitir:</span>
-              <span className="font-mono font-semibold text-emerald-400">
+              <span>Cotas que você vai receber:</span>
+              <span className="font-mono font-semibold text-emerald-400 tabular-nums">
                 +{formatShares(estimatedNewShares)} cotas
               </span>
             </div>
@@ -644,8 +713,8 @@ export function DepositTab({
           >
             {busy
               ? "Processando..."
-              : safeMultisigClient.isDemoSafe(safeAddress)
-                ? "Simular Depósito & Emitir Cotas"
+              : isDemo
+                ? "Simular Depósito & Receber Cotas"
                 : "Transferir USDC para a Safe"}
           </button>
         </form>
@@ -653,125 +722,153 @@ export function DepositTab({
         {/* Cadastro de Novo Amigo */}
         <form
           onSubmit={handleRegisterFriend}
-          className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 space-y-4"
+          className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6 space-y-4 flex flex-col justify-between"
         >
-          <div className="flex items-center gap-2 text-white font-semibold">
-            <UserPlus className="h-5 w-5 text-sky-400" />
-            <h2>Cadastrar Novo Amigo no Clube</h2>
-          </div>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Cadastre o endereço EVM de cada amigo (owner da Safe) para que o webhook da Alchemy
-            reconheça automaticamente os aportes enviados por ele.
-          </p>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-white font-semibold">
+              <UserPlus className="h-5 w-5 text-sky-400" />
+              <h2>Adicionar um Amigo ao Clube</h2>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Cada amigo pode entrar sozinho ao conectar e assinar com a própria carteira no topo da
+              tela. Se quiser pré-cadastrar alguém agora, informe o apelido e o endereço da carteira
+              pessoal dele (já incluída como <em>owner</em> na Safe).
+            </p>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Nome / Apelido do Amigo
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Ex: Bruno"
-              value={newNickname}
-              onChange={(e) => setNewNickname(e.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
-            />
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                Nome / Apelido do Amigo
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Bruno"
+                value={newNickname}
+                onChange={(e) => setNewNickname(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                Endereço da Carteira Pessoal (0x...)
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="0x..."
+                value={newWallet}
+                onChange={(e) => setNewWallet(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-mono text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Endereço da Carteira Pessoal (BNB Chain & Base)
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="0x..."
-              value={newWallet}
-              onChange={(e) => setNewWallet(e.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-mono text-white focus:border-emerald-500 focus:outline-none"
-            />
-          </div>
+          <div className="space-y-3 pt-2">
+            <div className="rounded-xl border border-slate-800/80 bg-slate-950/60 p-3 text-[11px] text-slate-400 flex items-start gap-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                Em produção, o servidor valida diretamente no contrato da Safe se o endereço faz
+                parte dos donos do cofre.
+              </span>
+            </div>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition"
-          >
-            Cadastrar Participante
-          </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition"
+            >
+              Cadastrar Participante
+            </button>
+          </div>
         </form>
       </div>
 
       {/* Histórico Completo do Ledger */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <ArrowDownLeft className="h-5 w-5 text-emerald-400" />
-          <h3 className="text-base font-semibold text-white">
-            Histórico Auditável de Cotas (Aportes e Resgates)
-          </h3>
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <ArrowDownLeft className="h-5 w-5 text-emerald-400" />
+            <div>
+              <h3 className="text-base font-semibold text-white">
+                Histórico de Entradas e Saídas (Livro-Razão)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Cada aporte ou resgate fica registrado com data, valor da cota do dia e link na
+                blockchain
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-xs uppercase text-slate-400">
-                <th className="pb-3">Data</th>
-                <th className="pb-3">Membro</th>
-                <th className="pb-3">Operação</th>
-                <th className="pb-3 text-right">Valor (USD)</th>
-                <th className="pb-3 text-right">Variação Cotas</th>
-                <th className="pb-3 text-right">NAV Aplicado</th>
-                <th className="pb-3 text-right">Tx</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {ledgerEntries.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="py-3 text-xs text-slate-400">
-                    {new Date(entry.createdAt).toLocaleString("pt-BR")}
-                  </td>
-                  <td className="py-3 font-medium text-white">{entry.memberNickname}</td>
-                  <td className="py-3">
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-                        entry.type === "DEPOSIT"
-                          ? "bg-emerald-500/15 text-emerald-300"
-                          : "bg-amber-500/15 text-amber-300"
+        {ledgerEntries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-400">
+            Nenhum aporte ou resgate registrado ainda. Quando alguém enviar USDC para a Safe, o
+            registro aparecerá aqui.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="pb-3">Data</th>
+                  <th className="pb-3">Participante</th>
+                  <th className="pb-3">Tipo</th>
+                  <th className="pb-3 text-right">Valor (USD)</th>
+                  <th className="pb-3 text-right">Cotas</th>
+                  <th className="pb-3 text-right">Preço da Cota</th>
+                  <th className="pb-3 text-right">Comprovante</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {ledgerEntries.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-slate-800/25 transition">
+                    <td className="py-3 text-xs text-slate-400 whitespace-nowrap">
+                      {new Date(entry.createdAt).toLocaleString("pt-BR")}
+                    </td>
+                    <td className="py-3 font-medium text-white">{entry.memberNickname}</td>
+                    <td className="py-3">
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                          entry.type === "DEPOSIT"
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : "bg-amber-500/15 text-amber-300"
+                        }`}
+                      >
+                        {entry.type === "DEPOSIT" ? "Aporte" : "Resgate"}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right font-mono text-xs text-white tabular-nums">
+                      {formatUsd(entry.amountUsd)}
+                    </td>
+                    <td
+                      className={`py-3 text-right font-mono text-xs font-semibold tabular-nums ${
+                        entry.sharesDelta >= 0 ? "text-emerald-400" : "text-amber-400"
                       }`}
                     >
-                      {entry.type === "DEPOSIT" ? "Aporte" : "Resgate"}
-                    </span>
-                  </td>
-                  <td className="py-3 text-right font-mono text-xs text-white">
-                    {formatUsd(entry.amountUsd)}
-                  </td>
-                  <td
-                    className={`py-3 text-right font-mono text-xs font-semibold ${
-                      entry.sharesDelta >= 0 ? "text-emerald-400" : "text-amber-400"
-                    }`}
-                  >
-                    {entry.sharesDelta >= 0 ? "+" : ""}
-                    {formatShares(entry.sharesDelta)}
-                  </td>
-                  <td className="py-3 text-right font-mono text-xs text-slate-300">
-                    US$ {entry.navAtExecutionUsd.toFixed(4)}
-                  </td>
-                  <td className="py-3 text-right">
-                    <a
-                      href={buildExplorerTxUrl(entry.txHash, entry.chainId)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:underline font-mono"
-                    >
-                      {shortenAddress(entry.txHash)}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {entry.sharesDelta >= 0 ? "+" : ""}
+                      {formatShares(entry.sharesDelta)}
+                    </td>
+                    <td className="py-3 text-right font-mono text-xs text-slate-300 tabular-nums">
+                      US$ {entry.navAtExecutionUsd.toFixed(4)}
+                    </td>
+                    <td className="py-3 text-right">
+                      <a
+                        href={buildExplorerTxUrl(entry.txHash, entry.chainId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:underline font-mono"
+                      >
+                        {shortenAddress(entry.txHash)}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
