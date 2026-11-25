@@ -48,12 +48,21 @@ function getNewestMtimeMs(targetPath) {
 function ensureBuiltArtifacts() {
   const apiEntry = path.join(__dirname, "apps/api/dist/bootstrap.js");
   const webBuildId = path.join(__dirname, "apps/web/.next/BUILD_ID");
+  const webPrerenderManifest = path.join(__dirname, "apps/web/.next/prerender-manifest.json");
+  const webRoutesManifest = path.join(__dirname, "apps/web/.next/routes-manifest.json");
+  const webBuildManifest = path.join(__dirname, "apps/web/.next/build-manifest.json");
 
-  const artifactsExist = fs.existsSync(apiEntry) && fs.existsSync(webBuildId);
+  const requiredArtifacts = [
+    apiEntry,
+    webBuildId,
+    webPrerenderManifest,
+    webRoutesManifest,
+    webBuildManifest,
+  ];
+  const artifactsExist = requiredArtifacts.every((filePath) => fs.existsSync(filePath));
   if (artifactsExist) {
     const oldestArtifactMtime = Math.min(
-      fs.statSync(apiEntry).mtimeMs,
-      fs.statSync(webBuildId).mtimeMs,
+      ...requiredArtifacts.map((filePath) => fs.statSync(filePath).mtimeMs),
     );
     const newestSourceMtime = Math.max(
       getNewestMtimeMs(path.join(__dirname, "packages/shared/src")),

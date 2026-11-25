@@ -55,7 +55,8 @@ const schemaDestDir = path.join(rootDir, "apps/api/dist/infrastructure/persisten
 fs.mkdirSync(schemaDestDir, { recursive: true });
 fs.copyFileSync(schemaSrc, path.join(schemaDestDir, "schema.sql"));
 
-// 3. Build @pertufundos/web com 1 CPU, cache webpack desligado e heap limitado
+// 3. Limpa .next parcial/antigo e compila @pertufundos/web com 1 CPU, cache webpack desligado e heap limitado
+fs.rmSync(path.join(rootDir, "apps/web/.next"), { recursive: true, force: true });
 runNodeStep(
   "3/3 Compilando @pertufundos/web (modo baixo consumo de RAM)",
   [nextBin, "build"],
