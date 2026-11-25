@@ -29,6 +29,7 @@ import {
 import type { IDexGateway } from "../ports/dex-gateway.port.js";
 import type { IFundRepository } from "../ports/fund-repository.port.js";
 import type { INotificationGateway } from "../ports/notification-gateway.port.js";
+import type { IVaultReader } from "../ports/vault-reader.port.js";
 import type { AssetCatalogService } from "./asset-catalog.service.js";
 import type { PortfolioValuationService } from "./portfolio-valuation.service.js";
 
@@ -43,6 +44,7 @@ export class GovernanceService {
     private readonly assetCatalog: AssetCatalogService,
     private readonly dexGateway: IDexGateway,
     private readonly notifications: INotificationGateway,
+    private readonly vaultReader?: IVaultReader,
   ) {}
 
   async listProposals(status?: ProposalStatus): Promise<Proposal[]> {
@@ -310,6 +312,15 @@ export class GovernanceService {
         humanAmount: proposal.amount,
         slippagePercent: Math.min(proposal.maxSlippagePercent, this.config.MAX_SLIPPAGE_PERCENT),
         currentAllowance: 0n,
+        getSourceAllowance: this.vaultReader
+          ? (spenderAddress) =>
+              this.vaultReader!.readAllowance({
+                tokenAddress: fromToken.address,
+                ownerAddress: this.config.SAFE_ADDRESS,
+                spenderAddress,
+                chainId: this.config.PRIMARY_CHAIN_ID,
+              })
+          : undefined,
       });
 
       this.assertPriceImpactSafe(swapBundle.quote.priceImpactPercent);
@@ -347,6 +358,15 @@ export class GovernanceService {
           humanAmount: leg.sellAmountTokens,
           slippagePercent: Math.min(proposal.maxSlippagePercent, this.config.MAX_SLIPPAGE_PERCENT),
           currentAllowance: 0n,
+          getSourceAllowance: this.vaultReader
+            ? (spenderAddress) =>
+                this.vaultReader!.readAllowance({
+                  tokenAddress: assetToken.address,
+                  ownerAddress: this.config.SAFE_ADDRESS,
+                  spenderAddress,
+                  chainId: this.config.PRIMARY_CHAIN_ID,
+                })
+            : undefined,
         });
 
         this.assertPriceImpactSafe(legSwap.quote.priceImpactPercent);

@@ -36,7 +36,15 @@ const ondoSharesOracleAbi = parseAbi([
 
 const safeContractAbi = parseAbi([
   "function getOwners() view returns (address[])",
+]);
+
+// Safe v1.3.x emite `bytes32 txHash` não-indexado; Safe v1.4.0+ emite `bytes32 indexed txHash`.
+const safeLegacyExecutionAbi = parseAbi([
   "event ExecutionSuccess(bytes32 txHash, uint256 payment)",
+]);
+
+const safeModernExecutionAbi = parseAbi([
+  "event ExecutionSuccess(bytes32 indexed txHash, uint256 payment)",
 ]);
 
 export class ViemVaultReader implements IVaultReader {
@@ -185,11 +193,22 @@ export class ViemVaultReader implements IVaultReader {
       (log) => log.address.toLowerCase() === params.safeAddress.toLowerCase(),
     );
 
-    const execEvents = parseEventLogs({
-      abi: safeContractAbi,
-      eventName: "ExecutionSuccess",
-      logs: safeLogs,
-    });
+    const safeDecodeExecution = (abi: typeof safeModernExecutionAbi | typeof safeLegacyExecutionAbi) => {
+      try {
+        return parseEventLogs({
+          abi,
+          eventName: "ExecutionSuccess",
+          logs: safeLogs,
+        });
+      } catch {
+        return [];
+      }
+    };
+
+    const execEvents = [
+      ...safeDecodeExecution(safeModernExecutionAbi),
+      ...safeDecodeExecution(safeLegacyExecutionAbi),
+    ];
 
     if (execEvents.length === 0) {
       throw new GuardrailError(

@@ -18,10 +18,31 @@ const baseChain = defineChain({
   blockExplorers: { default: { name: "BaseScan", url: "https://basescan.org" } },
 });
 
+const globalForWagmi = globalThis as typeof globalThis & {
+  __pertufundosWagmiConfigs?: Map<string, ReturnType<typeof createConfig>>;
+};
+
 export function createWagmiConfig(walletConnectProjectId?: string) {
-  const projectId = walletConnectProjectId?.trim();
+  const projectId = walletConnectProjectId?.trim() ?? "";
+
+  if (typeof window !== "undefined") {
+    const cache = (globalForWagmi.__pertufundosWagmiConfigs ??= new Map());
+    const existing = cache.get(projectId);
+    if (existing) {
+      return existing;
+    }
+
+    const config = buildWagmiConfig(projectId);
+    cache.set(projectId, config);
+    return config;
+  }
+
+  return buildWagmiConfig(projectId);
+}
+
+function buildWagmiConfig(projectId: string) {
   const connectors = projectId
-    ? [ 
+    ? [
         injected(),
         walletConnect({
           projectId,

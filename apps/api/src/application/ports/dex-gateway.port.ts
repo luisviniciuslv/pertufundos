@@ -30,10 +30,11 @@ export interface IDexGateway {
     toToken: TokenMetadata;
     humanAmount: number;
     slippagePercent: number;
-    currentAllowance: bigint;
+    currentAllowance?: bigint;
+    getSourceAllowance?: (spenderAddress: EvmAddress) => Promise<bigint>;
   }): Promise<SwapBundleResult>;
 
-  /** Monta transação Cross-Chain (OKX DEX v5) para enviar USDC da BNB Chain -> carteira pessoal na Base */
+  /** Monta transação Cross-Chain (OKX DEX v6) para enviar USDC da BNB Chain -> carteira pessoal na Base */
   buildCrossChainUsdcExitTransactions(params: {
     safeAddress: EvmAddress;
     recipientBaseAddress: EvmAddress;
@@ -41,7 +42,7 @@ export interface IDexGateway {
     slippagePercent: number;
   }): Promise<SafeMetaTx[]>;
 
-  /** Monta transações Cross-Chain (OKX DEX v5) para trazer USDC da Base -> carteira pessoal na BNB Chain */
+  /** Monta transações Cross-Chain (OKX DEX v6) para trazer USDC da Base -> carteira pessoal na BNB Chain */
   buildCrossChainBaseToBscBridgeTransactions(params: {
     fromBaseAddress: EvmAddress;
     recipientBscAddress: EvmAddress;

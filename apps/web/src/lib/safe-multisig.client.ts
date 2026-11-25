@@ -1,7 +1,17 @@
 import type { Eip1193Provider } from "@safe-global/protocol-kit";
 import type { EvmAddress, PreparedSafeBatch } from "@pertufundos/shared";
+import { getAddress } from "viem";
 
 const DEMO_SAFE_PLACEHOLDER = "0x1111111111111111111111111111111111111111";
+
+let runtimeSafeApiKey = "";
+
+export function setRuntimeSafeApiKey(apiKey?: string): void {
+  const trimmed = apiKey?.trim();
+  if (trimmed) {
+    runtimeSafeApiKey = trimmed;
+  }
+}
 
 async function initSafeKits(params: {
   provider: Eip1193Provider;
@@ -15,19 +25,22 @@ async function initSafeKits(params: {
     import("@safe-global/types-kit"),
   ]);
 
+  const checksumSigner = getAddress(params.signerAddress.toLowerCase()) as EvmAddress;
+  const checksumSafe = getAddress(params.safeAddress.toLowerCase()) as EvmAddress;
+
   const protocolKit = await Safe.init({
     provider: params.provider,
-    signer: params.signerAddress,
-    safeAddress: params.safeAddress,
+    signer: checksumSigner,
+    safeAddress: checksumSafe,
   });
 
-  const safeApiKey = process.env.NEXT_PUBLIC_SAFE_API_KEY;
+  const safeApiKey = runtimeSafeApiKey || process.env.NEXT_PUBLIC_SAFE_API_KEY?.trim() || "";
   const apiKit = new SafeApiKit({
     chainId: BigInt(params.chainId),
     ...(safeApiKey ? { apiKey: safeApiKey } : {}),
   });
 
-  return { protocolKit, apiKit, OperationType };
+  return { protocolKit, apiKit, OperationType, checksumSigner, checksumSafe };
 }
 
 function randomHexHash(): string {
@@ -54,7 +67,7 @@ export const safeMultisigClient = {
       return { safeTxHash: randomHexHash(), simulated: true };
     }
 
-    const { protocolKit, apiKit, OperationType } = await initSafeKits({
+    const { protocolKit, apiKit, OperationType, checksumSigner, checksumSafe } = await initSafeKits({
       provider,
       signerAddress,
       safeAddress: batch.safeAddress,
@@ -74,10 +87,10 @@ export const safeMultisigClient = {
     const signature = await protocolKit.signHash(safeTxHash);
 
     await apiKit.proposeTransaction({
-      safeAddress: batch.safeAddress,
+      safeAddress: checksumSafe,
       safeTransactionData: safeTransaction.data,
       safeTxHash,
-      senderAddress: signerAddress,
+      senderAddress: checksumSigner,
       senderSignature: signature.data,
       origin: "Pertufundos Collective Vault",
     });

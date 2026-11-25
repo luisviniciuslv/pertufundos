@@ -13,11 +13,15 @@ export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() || "";
+  const safeApiKey =
+    process.env.NEXT_PUBLIC_SAFE_API_KEY?.trim() || process.env.SAFE_API_KEY?.trim() || "";
 
   return (
     <html lang="pt-BR" className="dark">
       <body className="min-h-screen bg-slate-950 text-slate-100">
-        <Providers walletConnectProjectId={walletConnectProjectId}>{children}</Providers>
+        <Providers walletConnectProjectId={walletConnectProjectId} safeApiKey={safeApiKey}>
+          {children}
+        </Providers>
       </body>
     </html>
   );

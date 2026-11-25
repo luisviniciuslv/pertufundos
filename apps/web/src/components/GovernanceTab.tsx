@@ -8,10 +8,19 @@ import {
   type PreparedSafeBatch,
   type Proposal,
 } from "@pertufundos/shared";
-import { ChevronDown, CheckCircle2, ExternalLink, Play, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import {
+  ChevronDown,
+  CheckCircle2,
+  ExternalLink,
+  PenLine,
+  Play,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { Eip1193Provider } from "@safe-global/protocol-kit";
-import { useAccount } from "wagmi";
+import { useAccount, usePublicClient, useSwitchChain } from "wagmi";
 import { AssetPickerModal } from "@/components/AssetPickerModal";
 import { fundApi } from "@/lib/api-client";
 import { shortenAddress } from "@/lib/formatters";
@@ -34,7 +43,9 @@ export function GovernanceTab({
   proposals,
   onRefresh,
 }: GovernanceTabProps) {
-  const { connector } = useAccount();
+  const { connector, chainId } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
+  const bscPublicClient = usePublicClient({ chainId: primaryChainId });
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -63,6 +74,12 @@ export function GovernanceTab({
   async function getBrowserProvider(): Promise<Eip1193Provider | undefined> {
     if (!connector) return undefined;
     return (await connector.getProvider()) as Eip1193Provider;
+  }
+
+  async function ensurePrimaryChain(): Promise<void> {
+    if (chainId && chainId !== primaryChainId && switchChainAsync) {
+      await switchChainAsync({ chainId: primaryChainId });
+    }
   }
 
   async function handleCreateProposal(e: FormEvent) {
@@ -139,7 +156,9 @@ export function GovernanceTab({
     }
     setBusyId(proposal.id);
     setError(null);
+    setMessage(null);
     try {
+      await ensurePrimaryChain();
       const provider = await getBrowserProvider();
       const { safeTxHash, simulated } = await safeMultisigClient.proposeBatchToSafe({
         provider,
@@ -163,13 +182,43 @@ export function GovernanceTab({
     }
   }
 
+  async function handleConfirmOnSafe(proposal: Proposal) {
+    if (!activeWallet || !proposal.safeTxHash) return;
+    setBusyId(proposal.id);
+    setError(null);
+    setMessage(null);
+    try {
+      await ensurePrimaryChain();
+      const provider = await getBrowserProvider();
+      const { simulated } = await safeMultisigClient.confirmSafeTransaction({
+        provider,
+        signerAddress: activeWallet,
+        safeAddress,
+        chainId: primaryChainId,
+        safeTxHash: proposal.safeTxHash,
+      });
+      setMessage(
+        simulated
+          ? `[Modo Demo] Assinatura multisig simulada para ${shortenAddress(proposal.safeTxHash)}.`
+          : `Assinatura registrada na fila da Safe (${shortenAddress(proposal.safeTxHash)})! Quando atingir o quórum, clique em Executar.`,
+      );
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao assinar transação na Safe.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleExecuteOnSafe(proposal: Proposal) {
     if (!activeWallet) return;
     setBusyId(proposal.id);
     setError(null);
+    setMessage(null);
     try {
+      await ensurePrimaryChain();
       const provider = await getBrowserProvider();
-      const { executionTxHash } = await safeMultisigClient.executeSafeTransaction({
+      const { executionTxHash, simulated } = await safeMultisigClient.executeSafeTransaction({
         provider,
         signerAddress: activeWallet,
         safeAddress,
@@ -178,6 +227,12 @@ export function GovernanceTab({
           proposal.safeTxHash ??
           "0xcccc000000000000000000000000000000000000000000000000000000000001",
       });
+      if (!simulated && bscPublicClient) {
+        setMessage("Transação enviada para a BNB Chain. Aguardando confirmação on-chain...");
+        await bscPublicClient.waitForTransactionReceipt({
+          hash: executionTxHash as `0x${string}`,
+        });
+      }
       await fundApi.confirmExecution(proposal.id, {
         executionTxHash,
         executorAddress: activeWallet,
@@ -493,13 +548,23 @@ export function GovernanceTab({
 
                     {proposal.status === "PROPOSED_ON_SAFE" && (
                       <>
+                        {proposal.safeTxHash && (
+                          <button
+                            onClick={() => handleConfirmOnSafe(proposal)}
+                            disabled={busyId === proposal.id}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25"
+                          >
+                            <PenLine className="h-3.5 w-3.5" />
+                            2b. Assinar na Safe
+                          </button>
+                        )}
                         <button
                           onClick={() => handleExecuteOnSafe(proposal)}
                           disabled={busyId === proposal.id}
                           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
-                          Executar / Confirmar Liquidação
+                          3. Executar / Confirmar Liquidação
                         </button>
                         <a
                           href={buildSafeQueueUrl(safeAddress, primaryChainId)}

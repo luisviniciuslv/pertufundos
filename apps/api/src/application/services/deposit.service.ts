@@ -69,18 +69,28 @@ export class DepositService {
     });
 
     // 5. Persiste mutação atômica no Ledger + Snapshot de NAV pós-emissão
-    const entry = await this.repository.applyLedgerMutation({
-      memberId: member.id,
-      type: "DEPOSIT",
-      amountUsd: roundFinancial(cmd.amountUsd, 4),
-      sharesDelta: sharesToIssue,
-      navAtExecutionUsd,
-      newSharesBalance,
-      newAvgCostUsd,
-      realizedGainDeltaUsd: 0,
-      txHash: normalizedTxHash,
-      chainId: this.config.PRIMARY_CHAIN_ID,
-    });
+    // Trata condição de corrida caso o frontend (`/deposits/record`) e o Webhook da Alchemy cheguem juntos
+    let entry;
+    try {
+      entry = await this.repository.applyLedgerMutation({
+        memberId: member.id,
+        type: "DEPOSIT",
+        amountUsd: roundFinancial(cmd.amountUsd, 4),
+        sharesDelta: sharesToIssue,
+        navAtExecutionUsd,
+        newSharesBalance,
+        newAvgCostUsd,
+        realizedGainDeltaUsd: 0,
+        txHash: normalizedTxHash,
+        chainId: this.config.PRIMARY_CHAIN_ID,
+      });
+    } catch (err) {
+      const existingAfterRace = await this.repository.findLedgerEntryByTxHash(normalizedTxHash);
+      if (existingAfterRace) {
+        return { entry: existingAfterRace, idempotentReplay: true };
+      }
+      throw err;
+    }
 
     await this.repository.saveNavSnapshot({
       triggerEvent: `DEPOSIT:${member.nickname}`,

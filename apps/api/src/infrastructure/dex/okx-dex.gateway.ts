@@ -146,7 +146,10 @@ export class OkxDexGateway implements IDexGateway {
     try {
       const oneUnitRaw = toRawUnits(1, token.decimals).toString();
       const quote = await this.requestOkx<{
-        toTokenAmount: string;
+        toTokenAmount?: string;
+        routerResult?: {
+          toTokenAmount?: string;
+        };
       }>("GET", "/api/v6/dex/aggregator/quote", {
         chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
         fromTokenAddress: token.address,
@@ -155,11 +158,12 @@ export class OkxDexGateway implements IDexGateway {
       });
 
       const first = quote[0];
-      if (!first?.toTokenAmount) {
+      const rawToAmount = first?.toTokenAmount ?? first?.routerResult?.toTokenAmount;
+      if (!rawToAmount) {
         return { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" };
       }
       return {
-        unitPriceUsd: fromRawUnits(first.toTokenAmount, BNB_USDC_TOKEN.decimals),
+        unitPriceUsd: fromRawUnits(rawToAmount, BNB_USDC_TOKEN.decimals),
         source: "OKX_LIVE",
       };
     } catch {
@@ -173,7 +177,8 @@ export class OkxDexGateway implements IDexGateway {
     toToken: TokenMetadata;
     humanAmount: number;
     slippagePercent: number;
-    currentAllowance: bigint;
+    currentAllowance?: bigint;
+    getSourceAllowance?: (spenderAddress: EvmAddress) => Promise<bigint>;
   }): Promise<SwapBundleResult> {
     const rawAmount = toRawUnits(params.humanAmount, params.fromToken.decimals);
 
@@ -183,25 +188,37 @@ export class OkxDexGateway implements IDexGateway {
 
     // 1. Gera transação de Approve (OKX DEX v6 /approve-transaction) se allowance insuficiente
     const transactions: SafeMetaTx[] = [];
-    const approveData = await this.requestOkx<{
-      data: `0x${string}`;
-      dexContractAddress: EvmAddress;
-      gasLimit: string;
-    }>("GET", "/api/v6/dex/aggregator/approve-transaction", {
-      chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
-      tokenContractAddress: params.fromToken.address,
-      approveAmount: rawAmount.toString(),
-    });
+    const isNativeFromToken =
+      params.fromToken.address.toLowerCase() === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-    const approveItem = approveData[0];
-    if (approveItem && params.currentAllowance < rawAmount) {
-      transactions.push({
-        to: params.fromToken.address,
-        value: "0",
-        data: approveItem.data,
-        operation: 0,
-        description: `Aprovar ${params.humanAmount} ${params.fromToken.symbol} para o roteador OKX DEX`,
+    if (!isNativeFromToken) {
+      const approveData = await this.requestOkx<{
+        data: `0x${string}`;
+        dexContractAddress: EvmAddress;
+        gasLimit: string;
+      }>("GET", "/api/v6/dex/aggregator/approve-transaction", {
+        chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
+        tokenContractAddress: params.fromToken.address,
+        approveAmount: rawAmount.toString(),
       });
+
+      const approveItem = approveData[0];
+      if (approveItem) {
+        const spender = approveItem.dexContractAddress.toLowerCase() as EvmAddress;
+        const effectiveAllowance = params.getSourceAllowance
+          ? await params.getSourceAllowance(spender).catch(() => params.currentAllowance ?? 0n)
+          : (params.currentAllowance ?? 0n);
+
+        if (effectiveAllowance < rawAmount) {
+          transactions.push({
+            to: params.fromToken.address,
+            value: "0",
+            data: approveItem.data,
+            operation: 0,
+            description: `Aprovar ${params.humanAmount} ${params.fromToken.symbol} para o roteador OKX DEX`,
+          });
+        }
+      }
     }
 
     // 2. Gera calldata do Swap (OKX DEX v6 /swap)

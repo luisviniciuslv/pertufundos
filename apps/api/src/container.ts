@@ -73,6 +73,7 @@ export function createContainer(
     assetCatalogService,
     dexGateway,
     notifications,
+    vaultReader,
   );
   const taxReportService = new TaxReportService(repository, valuationService);
 

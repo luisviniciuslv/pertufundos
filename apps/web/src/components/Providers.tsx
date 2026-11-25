@@ -3,14 +3,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { WagmiProvider } from "wagmi";
+import { setRuntimeSafeApiKey } from "@/lib/safe-multisig.client";
 import { createWagmiConfig } from "@/lib/wagmi-config";
 
 interface ProvidersProps {
   children: ReactNode;
   walletConnectProjectId?: string;
+  safeApiKey?: string;
 }
 
-export function Providers({ children, walletConnectProjectId }: ProvidersProps) {
+export function Providers({ children, walletConnectProjectId, safeApiKey }: ProvidersProps) {
+  if (safeApiKey) {
+    setRuntimeSafeApiKey(safeApiKey);
+  }
   const [wagmiConfig] = useState(() => createWagmiConfig(walletConnectProjectId));
   const [queryClient] = useState(
     () =>
