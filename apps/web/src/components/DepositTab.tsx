@@ -18,9 +18,11 @@ import {
   Check,
   Copy,
   ExternalLink,
+  ListChecks,
   PlusCircle,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   UserPlus,
 } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
@@ -35,6 +37,7 @@ import {
   useWriteContract,
 } from "wagmi";
 import { InfoTip } from "@/components/InfoTip";
+import { UnifiedDepositFlow } from "@/components/UnifiedDepositFlow";
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
@@ -96,6 +99,7 @@ export function DepositTab({
   const baseEthHuman = baseEthBalance ? Number(baseEthBalance.formatted) : 0;
   const bscBnbHuman = bscBnbBalance ? Number(bscBnbBalance.formatted) : 0;
 
+  const [depositMode, setDepositMode] = useState<"unified" | "manual">("unified");
   const [amountUsd, setAmountUsd] = useState("500");
   const [bridgeAmountUsd, setBridgeAmountUsd] = useState("100");
   const [bridgeTxHash, setBridgeTxHash] = useState<string | null>(null);
@@ -516,6 +520,53 @@ export function DepositTab({
 
   return (
     <div className="space-y-6">
+      {/* Sub-abas do módulo Aportar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-2">
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Modo de aporte">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={depositMode === "unified"}
+            onClick={() => {
+              setDepositMode("unified");
+              setError(null);
+            }}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+              depositMode === "unified"
+                ? "bg-emerald-500 text-slate-950 shadow-sm shadow-emerald-500/20"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Fluxo Rápido (1 Clique)
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={depositMode === "manual"}
+            onClick={() => {
+              setDepositMode("manual");
+              setError(null);
+            }}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+              depositMode === "manual"
+                ? "bg-sky-500 text-slate-950 shadow-sm shadow-sky-500/20"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            Passo a Passo (Manual)
+          </button>
+        </div>
+
+        <span className="px-2 text-[11px] text-slate-400">
+          {depositMode === "unified"
+            ? "Traz da Base (se precisar) e deposita na Safe em sequência"
+            : "Controle individual de Bridge Base → BNB e Depósito na Safe"}
+        </span>
+      </div>
+
       {feedback && (
         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
           {feedback}
@@ -527,7 +578,42 @@ export function DepositTab({
         </div>
       )}
 
-      {/* Passo a passo visual do aporte */}
+      {depositMode === "unified" ? (
+        <UnifiedDepositFlow
+          safeAddress={safeAddress}
+          navPerShareUsd={navPerShareUsd}
+          activeWallet={activeWallet}
+          walletForBalances={walletForBalances}
+          isConnected={isConnected}
+          isDemo={isDemo}
+          currentChainId={currentChainId}
+          connector={connector}
+          baseUsdcBalance={baseUsdcBalance}
+          rawBaseUsdc={rawBaseUsdc}
+          bscUsdcBalance={bscUsdcBalance}
+          rawBscUsdc={rawBscUsdc}
+          baseEthHuman={baseEthHuman}
+          baseEthWei={baseEthBalance?.value}
+          bscBnbHuman={bscBnbHuman}
+          bscBnbWei={bscBnbBalance?.value}
+          onRefreshBalances={refreshWalletBalances}
+          onRefreshPortfolio={onRefresh}
+          onSuccess={(msg) => {
+            setError(null);
+            setFeedback(msg);
+          }}
+          onError={(msg) => {
+            if (msg) setFeedback(null);
+            setError(msg);
+          }}
+          onSwitchToManualTab={() => {
+            setDepositMode("manual");
+            setError(null);
+          }}
+        />
+      ) : (
+        <>
+          {/* Passo a passo visual do aporte */}
       <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
@@ -866,12 +952,42 @@ export function DepositTab({
           )}
         </form>
 
-        {/* Cadastro de Novo Amigo */}
-        <form
-          onSubmit={handleRegisterFriend}
-          className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6 space-y-4 flex flex-col justify-between"
-        >
-          <div className="space-y-4">
+        {/* Espaço informativo na coluna direita no modo manual */}
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6 space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-white font-semibold">
+              <Sparkles className="h-5 w-5 text-emerald-400" />
+              <h2>Prefere fazer tudo em 1 clique?</h2>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Na aba <strong>Fluxo Rápido (1 Clique)</strong>, você só escolhe o valor em USDC e o
+              sistema automaticamente traz da rede Base (se necessário), aguarda a chegada na BNB
+              Chain e solicita a confirmação final para enviar à Safe.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDepositMode("unified");
+              setError(null);
+            }}
+            className="w-full rounded-xl border border-emerald-500/40 bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/25 transition"
+          >
+            Ir para o Fluxo Rápido (1 Clique)
+          </button>
+        </div>
+      </div>
+        </>
+      )}
+
+      {/* Cadastro de Novo Amigo */}
+      <form
+        onSubmit={handleRegisterFriend}
+        className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6 space-y-4"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1 max-w-2xl">
             <div className="flex items-center gap-2 text-white font-semibold">
               <UserPlus className="h-5 w-5 text-sky-400" />
               <h2>Adicionar um Amigo ao Clube</h2>
@@ -881,55 +997,53 @@ export function DepositTab({
               tela. Se quiser pré-cadastrar alguém agora, informe o apelido e o endereço da carteira
               pessoal dele (já incluída como <em>owner</em> na Safe).
             </p>
+          </div>
+          <div className="rounded-xl border border-slate-800/80 bg-slate-950/60 px-3 py-2 text-[11px] text-slate-400 flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+            <span>Em produção, validado direto no contrato da Safe.</span>
+          </div>
+        </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Nome / Apelido do Amigo
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: Bruno"
-                value={newNickname}
-                onChange={(e) => setNewNickname(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Endereço da Carteira Pessoal (0x...)
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="0x..."
-                value={newWallet}
-                onChange={(e) => setNewWallet(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-mono text-white focus:border-emerald-500 focus:outline-none"
-              />
-            </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-12 items-end">
+          <div className="md:col-span-4">
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Nome / Apelido do Amigo
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="Ex: Bruno"
+              value={newNickname}
+              onChange={(e) => setNewNickname(e.target.value)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            />
           </div>
 
-          <div className="space-y-3 pt-2">
-            <div className="rounded-xl border border-slate-800/80 bg-slate-950/60 p-3 text-[11px] text-slate-400 flex items-start gap-2">
-              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-              <span>
-                Em produção, o servidor valida diretamente no contrato da Safe se o endereço faz
-                parte dos donos do cofre.
-              </span>
-            </div>
+          <div className="md:col-span-5">
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Endereço da Carteira Pessoal (0x...)
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="0x..."
+              value={newWallet}
+              onChange={(e) => setNewWallet(e.target.value)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-mono text-white focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
 
+          <div className="md:col-span-3">
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition"
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 px-4 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition"
             >
               Cadastrar Participante
             </button>
           </div>
-        </form>
-      </div>
+        </div>
+      </form>
 
       {/* Histórico Completo do Ledger */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/55 p-6">
