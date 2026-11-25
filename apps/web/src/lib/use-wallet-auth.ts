@@ -6,7 +6,7 @@ import { useAccount, useConnect, useDisconnect, useSignMessage, type Connector }
 import { authTokenStore, fundApi } from "@/lib/api-client";
 
 const MISSING_WALLET_MSG =
-  "Nenhuma carteira Web3 detectada neste navegador. Instale a extensão Rabby Wallet ou MetaMask (no celular, abra pelo navegador interno da sua carteira).";
+  "Nenhuma carteira Web3 detectada neste navegador. Para conectar pelo celular via QR Code, configure NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID (grátis em cloud.reown.com) no servidor, ou use Rabby/MetaMask.";
 
 function formatConnectError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err ?? "");
@@ -17,8 +17,11 @@ function formatConnectError(err: unknown): string {
 }
 
 async function resolveWorkingConnectors(connectors: readonly Connector[]): Promise<Connector[]> {
+  const walletConnectConnectors = connectors.filter((c) => c.id === "walletConnect");
+  const injectedCandidates = connectors.filter((c) => c.id !== "walletConnect");
+
   const checks = await Promise.all(
-    connectors.map(async (connector) => {
+    injectedCandidates.map(async (connector) => {
       try {
         const provider = await connector.getProvider();
         return provider ? connector : null;
@@ -28,9 +31,11 @@ async function resolveWorkingConnectors(connectors: readonly Connector[]): Promi
     }),
   );
 
-  const ready = checks.filter((c): c is Connector => c !== null);
-  const eip6963 = ready.filter((c) => c.id !== "injected");
-  return eip6963.length > 0 ? eip6963 : ready;
+  const readyExtensions = checks.filter((c): c is Connector => c !== null);
+  const eip6963 = readyExtensions.filter((c) => c.id !== "injected");
+  const preferredExtensions = eip6963.length > 0 ? eip6963 : readyExtensions;
+
+  return [...preferredExtensions, ...walletConnectConnectors];
 }
 
 export interface WalletAuthState {

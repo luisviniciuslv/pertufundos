@@ -16,6 +16,11 @@ const nextConfig = {
     workerThreads: false,
   },
   webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@base-org/account": false,
+      "@coinbase/cdp-sdk": false,
+    };
     config.resolve.fallback = {
       ...config.resolve.fallback,
       fs: false,

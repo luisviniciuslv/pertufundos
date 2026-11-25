@@ -142,6 +142,12 @@ Para produção (em dev local o sistema já usa SQLite automático sem precisar 
 * **Ondo Finance:** As ações tokenizadas (`NVDAon`, `AAPLon`, `MSFTon`, `QQQon`) são tokens BEP-20 negociados diretamente nos pools de liquidez via OKX DEX na BNB Chain. Vocês **não** precisam abrir conta institucional na Ondo nem preencher `ONDO_SHARES_ORACLE_ADDRESS` (deixe em branco).
 * **P2P.me:** O servidor do fundo nunca toca no Pix de ninguém. Cada amigo acessa **[app.p2p.me](https://app.p2p.me)** diretamente no celular/navegador quando recebe o USDC na sua própria carteira na rede **Base**, conecta a carteira e informa o próprio Pix.
 
+### 3.8 — Conectar por QR Code pelo Celular (`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`, Opcional)
+Se algum amigo usar um navegador no PC sem extensão da Rabby/MetaMask (ou preferir escanear um **QR Code** com a Rabby/MetaMask/OKX do celular):
+1. Crie uma conta gratuita em **[cloud.reown.com](https://cloud.reown.com)** (antigo WalletConnect Cloud) e crie um projeto (ex: `Pertufundos`).
+2. Copie o **Project ID** gerado e cole em **`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`** nas variáveis de ambiente (e reinicie o container).
+3. Ao clicar em **Conectar Carteira**, o modal de **QR Code** aparece automaticamente!
+
 ---
 
 ## 4. Como Rodar o Sistema

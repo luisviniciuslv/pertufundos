@@ -109,7 +109,9 @@ export function HeaderBar({
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-slate-100 hover:bg-slate-800 transition"
                     >
                       <Wallet className="h-3.5 w-3.5 text-emerald-400" />
-                      {connector.name}
+                      {connector.id === "walletConnect"
+                        ? "WalletConnect (QR Code / Celular)"
+                        : connector.name}
                     </button>
                   ))}
                 </div>
