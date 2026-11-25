@@ -82,7 +82,7 @@ export function GovernanceTab({
       currentChainId: chainId,
       targetChainId: primaryChainId,
       targetChainLabel: "BNB Smart Chain",
-      connectorId: connector?.id,
+      connector,
       switchChainAsync,
     });
   }

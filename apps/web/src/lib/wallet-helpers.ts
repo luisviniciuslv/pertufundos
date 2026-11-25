@@ -32,25 +32,31 @@ export async function ensureWalletChain(params: {
   currentChainId: number | undefined;
   targetChainId: number;
   targetChainLabel: string;
-  connectorId: string | undefined;
+  connector?: {
+    id?: string;
+    getChainId?: () => Promise<number>;
+  };
   switchChainAsync: SwitchChainMutateAsync<Config, unknown> | undefined;
 }): Promise<void> {
-  const { currentChainId, targetChainId, targetChainLabel, connectorId, switchChainAsync } =
-    params;
+  const { currentChainId, targetChainId, targetChainLabel, connector, switchChainAsync } = params;
 
-  if (currentChainId === targetChainId || !switchChainAsync) {
+  const liveChainId =
+    typeof connector?.getChainId === "function"
+      ? await connector.getChainId().catch(() => currentChainId)
+      : currentChainId;
+
+  if (liveChainId === targetChainId || !switchChainAsync) {
     return;
   }
 
   try {
     await withTimeout(
       switchChainAsync({ chainId: targetChainId }),
-      12_000,
+      15_000,
       `Tempo esgotado ao trocar sua carteira para a rede ${targetChainLabel}. Selecione a rede ${targetChainLabel} manualmente na carteira e tente novamente.`,
     );
   } catch (err) {
-    // Em sessões WalletConnect, muitos apps móveis já operam na rede ou ignoram wallet_switchEthereumChain sem emitir chainChanged
-    if (err instanceof WalletTimeoutError && connectorId === "walletConnect") {
+    if (err instanceof WalletTimeoutError && connector?.id === "walletConnect") {
       return;
     }
     throw err;

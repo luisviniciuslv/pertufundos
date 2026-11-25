@@ -22,7 +22,7 @@ import {
   RefreshCw,
   UserPlus,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { erc20Abi } from "viem";
 import {
   useAccount,
@@ -36,7 +36,7 @@ import {
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
-import { ensureWalletChain, withTimeout } from "@/lib/wallet-helpers";
+import { ensureWalletChain } from "@/lib/wallet-helpers";
 
 interface DepositTabProps {
   safeAddress: EvmAddress;
@@ -97,6 +97,7 @@ export function DepositTab({
   const [busy, setBusy] = useState(false);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeStep, setBridgeStep] = useState<string | null>(null);
+  const bridgeAttemptRef = useRef(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,6 +147,7 @@ export function DepositTab({
       }
     }
 
+    const attemptId = ++bridgeAttemptRef.current;
     setBridgeBusy(true);
     setBridgeStep("1/4 Preparando rota na OKX...");
     setError(null);
@@ -158,6 +160,7 @@ export function DepositTab({
         amountUsdc: amount,
         slippagePercent: 1.0,
       });
+      if (bridgeAttemptRef.current !== attemptId) return;
 
       if (!isConnected || safeMultisigClient.isDemoSafe(safeAddress)) {
         setFeedback(
@@ -171,32 +174,31 @@ export function DepositTab({
         currentChainId,
         targetChainId: SUPPORTED_CHAINS.BASE.id,
         targetChainLabel: "Base",
-        connectorId: connector?.id,
+        connector,
         switchChainAsync,
       });
+      if (bridgeAttemptRef.current !== attemptId) return;
 
       let lastHash: `0x${string}` | undefined;
       for (const [idx, tx] of bridge.transactions.entries()) {
         setBridgeStep(
-          `3/4 Confirme na sua carteira (${idx + 1}/${bridge.transactions.length}): ${tx.description}`,
+          `3/4 Confirme no app/extensão da sua carteira (${idx + 1}/${bridge.transactions.length}): ${tx.description}`,
         );
-        const hash = await withTimeout(
-          sendTransactionAsync({
-            to: tx.to,
-            data: tx.data,
-            value: BigInt(tx.value || "0"),
-            chainId: SUPPORTED_CHAINS.BASE.id,
-          }),
-          90_000,
-          "Tempo esgotado aguardando confirmação na carteira. Abra o app/extensão da sua carteira para assinar ou reconecte-a no topo.",
-        );
+        const hash = await sendTransactionAsync({
+          to: tx.to,
+          data: tx.data,
+          value: BigInt(tx.value || "0"),
+          chainId: SUPPORTED_CHAINS.BASE.id,
+        });
+        if (bridgeAttemptRef.current !== attemptId) return;
         lastHash = hash;
         setBridgeTxHash(hash);
         if (basePublicClient) {
           setBridgeStep(
             `4/4 Aguardando confirmação na rede Base (${idx + 1}/${bridge.transactions.length})...`,
           );
-          await basePublicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
+          await basePublicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+          if (bridgeAttemptRef.current !== attemptId) return;
         }
       }
 
@@ -209,10 +211,14 @@ export function DepositTab({
         `Bridge Base -> BNB Chain enviada! Aguarde ~1–2 minutos para ~${bridge.expectedBscUsdc.toFixed(2)} USDC caírem na sua BNB Chain e depois clique em "Transferir USDC para a Safe".`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao enviar bridge da rede Base.");
+      if (bridgeAttemptRef.current === attemptId) {
+        setError(err instanceof Error ? err.message : "Erro ao enviar bridge da rede Base.");
+      }
     } finally {
-      setBridgeBusy(false);
-      setBridgeStep(null);
+      if (bridgeAttemptRef.current === attemptId) {
+        setBridgeBusy(false);
+        setBridgeStep(null);
+      }
     }
   }
 
@@ -248,24 +254,20 @@ export function DepositTab({
           currentChainId,
           targetChainId: SUPPORTED_CHAINS.BNB.id,
           targetChainLabel: "BNB Smart Chain",
-          connectorId: connector?.id,
+          connector,
           switchChainAsync,
         });
         // Transferência real ERC-20 de USDC na BNB Chain (18 decimais!) para o endereço da Safe
         const rawAmount = toRawUnits(parsedAmount, BNB_USDC_TOKEN.decimals);
-        txHash = await withTimeout(
-          writeContractAsync({
-            address: BNB_USDC_TOKEN.address,
-            abi: erc20Abi,
-            functionName: "transfer",
-            args: [safeAddress, rawAmount],
-            chainId: SUPPORTED_CHAINS.BNB.id,
-          }),
-          90_000,
-          "Tempo esgotado aguardando confirmação na carteira para transferir USDC para a Safe.",
-        );
+        txHash = await writeContractAsync({
+          address: BNB_USDC_TOKEN.address,
+          abi: erc20Abi,
+          functionName: "transfer",
+          args: [safeAddress, rawAmount],
+          chainId: SUPPORTED_CHAINS.BNB.id,
+        });
         if (bscPublicClient) {
-          await bscPublicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 });
+          await bscPublicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 });
         }
       } else {
         // Hash determinístico simulado para testes locais
@@ -466,8 +468,20 @@ export function DepositTab({
         </form>
 
         {bridgeBusy && bridgeStep && (
-          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2.5 text-xs text-sky-200">
-            {bridgeStep}
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2.5 text-xs text-sky-200 flex flex-wrap items-center justify-between gap-2">
+            <span>{bridgeStep}</span>
+            <button
+              type="button"
+              onClick={() => {
+                bridgeAttemptRef.current += 1;
+                setBridgeBusy(false);
+                setBridgeStep(null);
+                setError("Envio da bridge cancelado manualmente.");
+              }}
+              className="rounded-lg border border-sky-400/40 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-sky-200 hover:bg-slate-800 transition"
+            >
+              Cancelar espera
+            </button>
           </div>
         )}
 
