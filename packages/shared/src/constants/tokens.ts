@@ -128,7 +128,7 @@ export const CURATED_CRYPTO_TOKENS: readonly TokenMetadata[] = [
     symbol: "ETH",
     name: "Ethereum (BNB Chain Peg)",
     underlyingTicker: "ETH",
-    address: "0x2170Ed0880ac9A757fd29B218898b397959f933f",
+    address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
     chainId: SUPPORTED_CHAINS.BNB.id,
     decimals: 18,
     category: "CRYPTO",

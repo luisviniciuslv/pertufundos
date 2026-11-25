@@ -63,9 +63,9 @@ Usado pelo backend para assinar os tokens de login quando cada amigo assina a me
 
 ### 3.2 — OKX Onchain OS (`OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_API_PASSPHRASE`, `OKX_PROJECT_ID`)
 Responsável por buscar o melhor preço das ações tokenizadas (`NVDAon`, `AAPLon`, `MSFTon`, `QQQon`) e montar a *bridge* de USDC da BNB Chain para a Base.
-1. Acesse **[web3.okx.com/build](https://web3.okx.com/build)** (OKX Web3 Developer Portal).
+1. Acesse **[web3.okx.com/onchainos/dev-portal](https://web3.okx.com/onchainos/dev-portal)** (OKX Web3 Developer Portal / Onchain OS).
 2. Clique em **Connect Wallet** no canto superior direito e assine a mensagem de login com sua carteira (se for o primeiro acesso, clique em **Get started** e valide seu e-mail/telefone).
-3. Na tela inicial do painel de desenvolvedor, um projeto padrão já aparece criado (ou clique em **Create project**):
+3. Na tela de projetos do painel (**[web3.okx.com/onchainos/dev-portal/project](https://web3.okx.com/onchainos/dev-portal/project)**), um projeto padrão já aparece criado (ou clique em **Create project**):
    * Copie o identificador do projeto e cole em **`OKX_PROJECT_ID`**.
 4. Dentro do projeto, vá em **API Management / Home** e clique no botão **Create API key**:
    * **API Key Name:** `pertufundos-dex`
@@ -80,31 +80,39 @@ Responsável por buscar o melhor preço das ações tokenizadas (`NVDAon`, `AAPL
 ### 3.3 — Safe Developer Portal (`NEXT_PUBLIC_SAFE_API_KEY`)
 Permite que o frontend envie e leia propostas na fila oficial da Safe (`SafeApiKit`) sem cair em bloqueios de limite de requisições (*rate-limit*).
 1. Acesse **[developer.safe.global](https://developer.safe.global)** e crie sua conta gratuita / faça login.
-2. No menu lateral, clique em **API Keys** $\rightarrow$ **Create New API Key**.
+2. No menu lateral, clique em **API Keys** $\rightarrow$ **Create New API Key**:
+   * **Allowed IP Addresses:** deixe **em branco** (cada amigo acessa do próprio navegador/IP).
+   * **Allowed Domains:** deixe **em branco** para testar agora (em produção, você pode restringir opcionalmente ao domínio do frontend).
 3. Copie o token gerado (formato JWT `eyJ...`) e cole em **`NEXT_PUBLIC_SAFE_API_KEY`** (e `SAFE_API_KEY`) no `.env`.
 4. Também preencha **`SAFE_ADDRESS`** e **`NEXT_PUBLIC_SAFE_ADDRESS`** com o endereço `0x...` do cofre criado no Passo 2.2, e **`SAFE_THRESHOLD`** com o número mínimo de assinaturas (ex: `3`).
 
 ---
 
 ### 3.4 — Alchemy: RPCs Estáveis + Webhook de Depósitos (`BSC_RPC_URL`, `BASE_RPC_URL`, `ALCHEMY_WEBHOOK_SIGNING_KEY`)
-Na mesma conta gratuita da Alchemy vocês pegam tanto os links RPC rápidos quanto o monitoramento automático de aportes em USDC:
+Na mesma conta gratuita da Alchemy vocês pegam tanto os links RPC rápidos quanto o monitoramento automático de aportes em USDC.
+
+> 💡 **Importante sobre o onboarding inicial da Alchemy:**
+> Ao criar a conta (`dashboard.alchemy.com`), a Alchemy cria um **App padrão** e mostra na hora uma **API Key** e um **endpoint de Ethereum** (`https://eth-mainnet.g.alchemy.com/v2/...`).
+> * **O endpoint do Ethereum NÃO é usado em nenhum lugar** do Pertufundos (o sistema opera na **BNB Smart Chain** e na **Base**) — pode ignorar.
+> * A **API Key** também **não** vai sozinha em uma variável separada: você usa essa mesma chave no final das URLs de **BNB Smart Chain** e **Base** abaixo.
 
 **Parte A — Pegar `BSC_RPC_URL` e `BASE_RPC_URL`:**
-1. Crie uma conta gratuita em **[dashboard.alchemy.com](https://dashboard.alchemy.com)**.
-2. No menu lateral, clique em **Apps $\rightarrow$ Create new app** (nome: `Pertufundos`).
-3. Habilite as redes **BNB Smart Chain** e **Base**.
-4. Na aba **Networks** do seu app:
-   * Copie a URL HTTPS da **BNB Smart Chain Mainnet** (`https://bnb-mainnet.g.alchemy.com/v2/...`) $\rightarrow$ cole em **`BSC_RPC_URL`**.
-   * Copie a URL HTTPS da **Base Mainnet** (`https://base-mainnet.g.alchemy.com/v2/...`) $\rightarrow$ cole em **`BASE_RPC_URL`**.
+1. No painel **[dashboard.alchemy.com](https://dashboard.alchemy.com)**, abra o App padrão já criado no onboarding (ou vá em **Apps $\rightarrow$ Create new app** com o nome `Pertufundos`).
+2. Dentro do App, entre na aba **Networks** (ou **Configure / Chains**) e ative as redes **BNB Smart Chain** e **Base**.
+3. Ainda em **Networks**, copie as URLs **HTTPS** (ambas usam a mesma API Key do seu App):
+   * **BNB Smart Chain Mainnet** (`https://bnb-mainnet.g.alchemy.com/v2/SUA_API_KEY`) $\rightarrow$ cole em **`BSC_RPC_URL`**.
+   * **Base Mainnet** (`https://base-mainnet.g.alchemy.com/v2/SUA_API_KEY`) $\rightarrow$ cole em **`BASE_RPC_URL`**.
 
 **Parte B — Pegar `ALCHEMY_WEBHOOK_SIGNING_KEY`:**
-1. Ainda no painel da Alchemy, vá no menu lateral em **Data $\rightarrow$ Webhooks $\rightarrow$ Create Webhook**.
+*(Opcional em testes locais: se ainda não tiver subido o backend na nuvem, pode deixar `ALCHEMY_WEBHOOK_SIGNING_KEY` em branco por enquanto.)*
+1. No menu lateral da Alchemy, vá em **Data $\rightarrow$ Webhooks $\rightarrow$ Create Webhook** (ou **Webhooks $\rightarrow$ Create Webhook**).
 2. Escolha o tipo **Address Activity**:
    * **Chain:** `BNB Smart Chain` / **Network:** `Mainnet`
-   * **Webhook URL:** `https://SEU-BACKEND.up.railway.app/api/v1/webhooks/alchemy`
-     *(Dica: se quiser testar o webhook no seu PC antes de subir na nuvem, rode `npx ngrok http 4000` e use a URL HTTPS gerada pelo ngrok + `/api/v1/webhooks/alchemy`)*.
-   * **Addresses to track:** Cole o endereço `0x...` da **Safe do grupo** e clique em **Create Webhook**.
-3. Na listagem de Webhooks, clique nos três pontinhos (`...`) ou em **Signing Key** ao lado do webhook criado, copie o código (`whsec_...` ou hex) e cole em **`ALCHEMY_WEBHOOK_SIGNING_KEY`**.
+   * **Webhook URL:** use a URL pública do seu app na Square Cloud + `/api/v1/webhooks/alchemy`, por exemplo:
+     `https://SEU-SUBDOMINIO.squareweb.app/api/v1/webhooks/alchemy`
+     *(Como o `server.mjs` roda Frontend e Backend no mesmo container, tudo que começa com `/api/v1/...` vai direto para a API! Se usar Railway/Render separado, troque pelo domínio do backend. E para testar no seu PC antes de subir, rode `npx ngrok http 4000` e use `https://SUA-URL.ngrok-free.app/api/v1/webhooks/alchemy`.)*
+   * **Addresses to track:** cole o endereço `0x...` da **Safe do grupo** e clique em **Create Webhook**.
+3. Na listagem de Webhooks, clique nos três pontinhos (`...`) $\rightarrow$ **Details** / **Signing Key** ao lado do webhook criado, copie a chave e cole em **`ALCHEMY_WEBHOOK_SIGNING_KEY`**.
 
 ---
 

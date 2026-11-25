@@ -7,10 +7,10 @@ import {
   type EvmAddress,
   type TokenMetadata,
 } from "@pertufundos/shared";
-import { createPublicClient, erc20Abi, formatUnits, http, parseAbi, parseEventLogs } from "viem";
+import { createPublicClient, erc20Abi, formatUnits, getAddress, http, parseAbi, parseEventLogs } from "viem";
 import { bsc } from "viem/chains";
 import type { AppConfig } from "../../config/env.js";
-import { GuardrailError } from "../../domain/errors.js";
+import { DomainError, GuardrailError } from "../../domain/errors.js";
 import type { IFundRepository } from "../../application/ports/fund-repository.port.js";
 import type {
   IVaultReader,
@@ -19,6 +19,15 @@ import type {
 } from "../../application/ports/vault-reader.port.js";
 
 const DEMO_SAFE_PLACEHOLDER = "0x1111111111111111111111111111111111111111";
+
+/** Normaliza qualquer endereço 0x... para EIP-55 checksum válido exigido pelo `viem`. */
+function toChecksumAddress(address: string): EvmAddress {
+  try {
+    return getAddress(address.toLowerCase());
+  } catch {
+    throw new DomainError(`Endereço EVM inválido: ${address}`, 400, "INVALID_EVM_ADDRESS");
+  }
+}
 
 const ondoSharesOracleAbi = parseAbi([
   "function getSValueBatch(address[] assets) view returns (uint256[] sValues, bool[] paused)",
@@ -51,7 +60,7 @@ export class ViemVaultReader implements IVaultReader {
       return [];
     }
     const owners = await this.publicClient.readContract({
-      address: safeAddress,
+      address: toChecksumAddress(safeAddress),
       abi: safeContractAbi,
       functionName: "getOwners",
     });
@@ -63,20 +72,21 @@ export class ViemVaultReader implements IVaultReader {
     name: string;
     decimals: number;
   }> {
+    const checksumAddress = toChecksumAddress(tokenAddress);
     try {
       const [symbol, name, decimals] = await Promise.all([
         this.publicClient.readContract({
-          address: tokenAddress,
+          address: checksumAddress,
           abi: erc20Abi,
           functionName: "symbol",
         }),
         this.publicClient.readContract({
-          address: tokenAddress,
+          address: checksumAddress,
           abi: erc20Abi,
           functionName: "name",
         }),
         this.publicClient.readContract({
-          address: tokenAddress,
+          address: checksumAddress,
           abi: erc20Abi,
           functionName: "decimals",
         }),
@@ -189,14 +199,15 @@ export class ViemVaultReader implements IVaultReader {
       return this.buildSimulatedDemoBalances(allVaultTokens);
     }
 
+    const checksumSafe = toChecksumAddress(safeAddress);
     const [balances, multipliers] = await Promise.all([
       Promise.all(
         allVaultTokens.map((token) =>
           this.publicClient.readContract({
-            address: token.address,
+            address: toChecksumAddress(token.address),
             abi: erc20Abi,
             functionName: "balanceOf",
-            args: [safeAddress],
+            args: [checksumSafe],
           }),
         ),
       ),
@@ -220,10 +231,10 @@ export class ViemVaultReader implements IVaultReader {
     }
 
     return this.publicClient.readContract({
-      address: params.tokenAddress,
+      address: toChecksumAddress(params.tokenAddress),
       abi: erc20Abi,
       functionName: "allowance",
-      args: [params.ownerAddress, params.spenderAddress],
+      args: [toChecksumAddress(params.ownerAddress), toChecksumAddress(params.spenderAddress)],
     });
   }
 
@@ -239,11 +250,11 @@ export class ViemVaultReader implements IVaultReader {
     try {
       const stockAddresses = vaultTokens
         .filter((t) => t.category === "ONDO_STOCK")
-        .map((t) => t.address);
+        .map((t) => toChecksumAddress(t.address));
       if (stockAddresses.length === 0) return result;
 
       const [sValues] = await this.publicClient.readContract({
-        address: oracleAddress as EvmAddress,
+        address: toChecksumAddress(oracleAddress),
         abi: ondoSharesOracleAbi,
         functionName: "getSValueBatch",
         args: [stockAddresses],
