@@ -27,6 +27,7 @@ function hasRequiredBuildDeps() {
     );
     reqShared.resolve("typescript/bin/tsc");
     reqWeb.resolve("next/dist/bin/next");
+    reqWeb.resolve("qrcode");
     return true;
   } catch {
     return false;

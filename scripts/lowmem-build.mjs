@@ -17,7 +17,7 @@ const requireFromWeb = createRequire(
   pathToFileURL(path.join(rootDir, "apps/web/package.json")).href,
 );
 
-const MAX_BUILD_HEAP_MB = process.env.LOW_MEM_HEAP_MB || "480";
+const MAX_BUILD_HEAP_MB = process.env.LOW_MEM_HEAP_MB || "520";
 
 function runNodeStep(label, args, cwd, extraEnv = {}) {
   console.log(`\n🔨 [lowmem-build] ${label}...`);

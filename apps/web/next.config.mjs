@@ -27,6 +27,8 @@ const nextConfig = {
       "@gemini-wallet/core": false,
       "@metamask/sdk": false,
       "@react-native-async-storage/async-storage": false,
+      "@reown/appkit": false,
+      "@reown/appkit/core": false,
       "@safe-global/safe-apps-sdk": false,
       porto: false,
       "porto/internal": false,

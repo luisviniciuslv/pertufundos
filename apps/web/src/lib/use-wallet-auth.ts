@@ -46,6 +46,8 @@ export interface WalletAuthState {
   readonly isSigningIn: boolean;
   readonly authError: string | null;
   readonly availableConnectors: readonly Connector[];
+  readonly walletConnectUri: string | null;
+  readonly dismissWalletConnectUri: () => void;
   readonly connectWallet: (connector?: Connector) => Promise<void>;
   readonly signInWithWallet: () => Promise<void>;
   readonly signOut: () => void;
@@ -63,6 +65,11 @@ export function useWalletAuth(): WalletAuthState {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [availableConnectors, setAvailableConnectors] = useState<readonly Connector[]>([]);
+  const [walletConnectUri, setWalletConnectUri] = useState<string | null>(null);
+
+  const dismissWalletConnectUri = useCallback(() => {
+    setWalletConnectUri(null);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -91,15 +98,51 @@ export function useWalletAuth(): WalletAuthState {
   const connectWallet = useCallback(
     async (chosenConnector?: Connector) => {
       setAuthError(null);
+      setWalletConnectUri(null);
       const target = chosenConnector ?? (await resolveWorkingConnectors(connectors))[0];
       if (!target) {
         setAuthError(MISSING_WALLET_MSG);
         return;
       }
+
+      type WcProviderEvents = {
+        on?: (event: string, listener: (uri: string) => void) => void;
+        off?: (event: string, listener: (uri: string) => void) => void;
+        removeListener?: (event: string, listener: (uri: string) => void) => void;
+      };
+
+      let wcProvider: WcProviderEvents | undefined;
+      const onDisplayUri = (uri: string) => {
+        setWalletConnectUri(uri);
+      };
+
+      if (target.id === "walletConnect") {
+        try {
+          wcProvider = (await target.getProvider()) as WcProviderEvents | undefined;
+          wcProvider?.on?.("display_uri", onDisplayUri);
+        } catch {
+          // O callback onError do wagmi exibirá a falha caso ocorra
+        }
+      }
+
+      const cleanupDisplayUri = () => {
+        if (!wcProvider) return;
+        wcProvider.off?.("display_uri", onDisplayUri);
+        wcProvider.removeListener?.("display_uri", onDisplayUri);
+      };
+
       connect(
         { connector: target },
         {
-          onError: (err) => setAuthError(formatConnectError(err)),
+          onSuccess: () => {
+            setWalletConnectUri(null);
+            cleanupDisplayUri();
+          },
+          onError: (err) => {
+            setWalletConnectUri(null);
+            cleanupDisplayUri();
+            setAuthError(formatConnectError(err));
+          },
         },
       );
     },
@@ -153,6 +196,8 @@ export function useWalletAuth(): WalletAuthState {
     isSigningIn,
     authError,
     availableConnectors,
+    walletConnectUri,
+    dismissWalletConnectUri,
     connectWallet,
     signInWithWallet,
     signOut,

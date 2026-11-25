@@ -10,6 +10,7 @@ import { CheckCircle2, ChevronDown, Clock, ExternalLink, KeyRound, LogOut, Shiel
 import { useState } from "react";
 import { shortenAddress } from "@/lib/formatters";
 import type { WalletAuthState } from "@/lib/use-wallet-auth";
+import { WalletConnectQrModal } from "./WalletConnectQrModal";
 
 interface HeaderBarProps {
   safeAddress: EvmAddress;
@@ -159,6 +160,11 @@ export function HeaderBar({
           )}
         </div>
       </div>
+
+      <WalletConnectQrModal
+        uri={walletAuth.walletConnectUri}
+        onClose={walletAuth.dismissWalletConnectUri}
+      />
     </header>
   );
 }
