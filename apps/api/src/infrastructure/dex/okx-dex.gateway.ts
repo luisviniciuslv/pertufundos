@@ -439,7 +439,7 @@ export class OkxDexGateway implements IDexGateway {
       fromTokenAddress: params.fromToken.address,
       toTokenAddress: params.toToken.address,
       amount: rawFromAmount.toString(),
-      slippagePercent: String(params.slippagePercent),
+      slippage: String(params.slippagePercent / 100),
       userWalletAddress: params.userWalletAddress,
       receiveAddress: params.receiveAddress,
     });
