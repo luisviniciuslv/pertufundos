@@ -9,6 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT) || 80;
 const host = process.env.HOST || "0.0.0.0";
 
+// Silencia apenas o aviso cosmético do Node 26 quando libs Web3 consultam `localStorage` no SSR
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = (warning, ...args) => {
+  const message = typeof warning === "string" ? warning : warning?.message || "";
+  if (message.includes("localStorage is not available")) return;
+  return originalEmitWarning.call(process, warning, ...args);
+};
+
 function hasRequiredBuildDeps() {
   try {
     const reqShared = createRequire(

@@ -22,7 +22,8 @@ const MAX_BUILD_HEAP_MB = process.env.LOW_MEM_HEAP_MB || "640";
 function runNodeStep(label, args, cwd, extraEnv = {}) {
   console.log(`\n🔨 [lowmem-build] ${label}...`);
   const existingNodeOpts = process.env.NODE_OPTIONS || "";
-  const nodeOptions = `${existingNodeOpts} --max-old-space-size=${MAX_BUILD_HEAP_MB}`.trim();
+  const nodeOptions =
+    `${existingNodeOpts} --max-old-space-size=${MAX_BUILD_HEAP_MB} --disable-warning=ExperimentalWarning`.trim();
 
   const res = spawnSync(process.execPath, args, {
     cwd,
