@@ -59,12 +59,21 @@ export class ViemVaultReader implements IVaultReader {
     if (this.isDemoSafe(safeAddress)) {
       return [];
     }
-    const owners = await this.publicClient.readContract({
-      address: toChecksumAddress(safeAddress),
-      abi: safeContractAbi,
-      functionName: "getOwners",
-    });
-    return owners.map((addr) => addr.toLowerCase() as EvmAddress);
+    const checksumSafe = toChecksumAddress(safeAddress);
+    try {
+      const owners = await this.publicClient.readContract({
+        address: checksumSafe,
+        abi: safeContractAbi,
+        functionName: "getOwners",
+      });
+      return owners.map((addr) => addr.toLowerCase() as EvmAddress);
+    } catch {
+      throw new DomainError(
+        `O endereço SAFE_ADDRESS (${checksumSafe}) não é um contrato Safe Multisig na BNB Smart Chain (getOwners() falhou). Crie a Safe em app.safe.global (rede BNB Smart Chain) e configure o endereço do cofre em SAFE_ADDRESS e NEXT_PUBLIC_SAFE_ADDRESS.`,
+        422,
+        "INVALID_SAFE_CONTRACT",
+      );
+    }
   }
 
   async readTokenMetadataOnChain(tokenAddress: EvmAddress): Promise<{
