@@ -2,8 +2,36 @@
 
 import type { EvmAddress } from "@pertufundos/shared";
 import { useCallback, useEffect, useState } from "react";
-import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
+import { useAccount, useConnect, useDisconnect, useSignMessage, type Connector } from "wagmi";
 import { authTokenStore, fundApi } from "@/lib/api-client";
+
+const MISSING_WALLET_MSG =
+  "Nenhuma carteira Web3 detectada neste navegador. Instale a extensão Rabby Wallet ou MetaMask (no celular, abra pelo navegador interno da sua carteira).";
+
+function formatConnectError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  if (raw.includes("Provider not found") || raw.includes("ConnectorNotFoundError")) {
+    return MISSING_WALLET_MSG;
+  }
+  return raw || "Falha ao conectar carteira Web3.";
+}
+
+async function resolveWorkingConnectors(connectors: readonly Connector[]): Promise<Connector[]> {
+  const checks = await Promise.all(
+    connectors.map(async (connector) => {
+      try {
+        const provider = await connector.getProvider();
+        return provider ? connector : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const ready = checks.filter((c): c is Connector => c !== null);
+  const eip6963 = ready.filter((c) => c.id !== "injected");
+  return eip6963.length > 0 ? eip6963 : ready;
+}
 
 export interface WalletAuthState {
   readonly connectedWallet: EvmAddress | undefined;
@@ -12,7 +40,8 @@ export interface WalletAuthState {
   readonly isAuthenticated: boolean;
   readonly isSigningIn: boolean;
   readonly authError: string | null;
-  readonly connectWallet: () => void;
+  readonly availableConnectors: readonly Connector[];
+  readonly connectWallet: (connector?: Connector) => Promise<void>;
   readonly signInWithWallet: () => Promise<void>;
   readonly signOut: () => void;
 }
@@ -28,6 +57,17 @@ export function useWalletAuth(): WalletAuthState {
   const [authenticatedWallet, setAuthenticatedWallet] = useState<EvmAddress | undefined>(undefined);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [availableConnectors, setAvailableConnectors] = useState<readonly Connector[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void resolveWorkingConnectors(connectors).then((ready) => {
+      if (active) setAvailableConnectors(ready);
+    });
+    return () => {
+      active = false;
+    };
+  }, [connectors]);
 
   // Sincroniza a sessão armazenada sempre que a carteira conectada mudar na extensão
   useEffect(() => {
@@ -43,24 +83,27 @@ export function useWalletAuth(): WalletAuthState {
     }
   }, [isConnected, connectedWallet]);
 
-  const connectWallet = useCallback(() => {
-    setAuthError(null);
-    const injectedConnector = connectors[0];
-    if (!injectedConnector) {
-      setAuthError("Nenhuma extensão de carteira Web3 (Rabby / MetaMask) detectada no navegador.");
-      return;
-    }
-    connect(
-      { connector: injectedConnector },
-      {
-        onError: (err) => setAuthError(err.message),
-      },
-    );
-  }, [connectors, connect]);
+  const connectWallet = useCallback(
+    async (chosenConnector?: Connector) => {
+      setAuthError(null);
+      const target = chosenConnector ?? (await resolveWorkingConnectors(connectors))[0];
+      if (!target) {
+        setAuthError(MISSING_WALLET_MSG);
+        return;
+      }
+      connect(
+        { connector: target },
+        {
+          onError: (err) => setAuthError(formatConnectError(err)),
+        },
+      );
+    },
+    [connectors, connect],
+  );
 
   const signInWithWallet = useCallback(async () => {
     if (!connectedWallet) {
-      connectWallet();
+      await connectWallet();
       return;
     }
     setIsSigningIn(true);
@@ -104,6 +147,7 @@ export function useWalletAuth(): WalletAuthState {
     isAuthenticated: Boolean(authenticatedWallet && connectedWallet === authenticatedWallet),
     isSigningIn,
     authError,
+    availableConnectors,
     connectWallet,
     signInWithWallet,
     signOut,

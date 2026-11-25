@@ -6,7 +6,8 @@ import {
   type MarketSessionStatus,
   type MemberPosition,
 } from "@pertufundos/shared";
-import { CheckCircle2, Clock, ExternalLink, KeyRound, LogOut, ShieldCheck, Wallet } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock, ExternalLink, KeyRound, LogOut, ShieldCheck, Wallet } from "lucide-react";
+import { useState } from "react";
 import { shortenAddress } from "@/lib/formatters";
 import type { WalletAuthState } from "@/lib/use-wallet-auth";
 
@@ -29,6 +30,9 @@ export function HeaderBar({
   authenticatedMember,
   walletAuth,
 }: HeaderBarProps) {
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  const multipleWallets = walletAuth.availableConnectors.length > 1;
+
   return (
     <header className="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md sticky top-0 z-30">
       <div className="mx-auto max-w-7xl px-4 py-3.5 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
@@ -74,13 +78,43 @@ export function HeaderBar({
 
           {/* Identidade Web3 Soberana (Sem Impersonation) */}
           {!walletAuth.isConnected ? (
-            <button
-              onClick={walletAuth.connectWallet}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 transition"
-            >
-              <Wallet className="h-3.5 w-3.5" />
-              Conectar Carteira
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (multipleWallets) {
+                    setWalletMenuOpen((open) => !open);
+                  } else {
+                    void walletAuth.connectWallet();
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 transition"
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Conectar Carteira
+                {multipleWallets && <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+
+              {multipleWallets && walletMenuOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-xl z-40">
+                  <p className="px-2.5 py-1 text-[11px] font-medium text-slate-400">
+                    Escolha sua carteira
+                  </p>
+                  {walletAuth.availableConnectors.map((connector) => (
+                    <button
+                      key={connector.uid}
+                      onClick={() => {
+                        setWalletMenuOpen(false);
+                        void walletAuth.connectWallet(connector);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-slate-100 hover:bg-slate-800 transition"
+                    >
+                      <Wallet className="h-3.5 w-3.5 text-emerald-400" />
+                      {connector.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : !walletAuth.isAuthenticated ? (
             <div className="flex items-center gap-2">
               <button
