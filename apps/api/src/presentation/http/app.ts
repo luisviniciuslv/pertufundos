@@ -5,12 +5,14 @@ import {
   createRedemptionSchema,
   createTradeProposalSchema,
   evmAddressSchema,
+  fromRawUnits,
   linkSafeTxSchema,
   prepareBaseBridgeSchema,
   recordDepositSchema,
   registerMemberSchema,
   requestAuthChallengeSchema,
   SUPPORTED_CHAINS,
+  toRawUnits,
   trackCustomAssetSchema,
   verifyAuthSignatureSchema,
   type EvmAddress,
@@ -21,7 +23,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { ZodError } from "zod";
 import type { AppContainer } from "../../container.js";
-import { DomainError, ForbiddenOperationError } from "../../domain/errors.js";
+import { DomainError, ForbiddenOperationError, GuardrailError } from "../../domain/errors.js";
 import {
   extractSafeUsdcDeposits,
   verifyAlchemyWebhookSignature,
@@ -240,6 +242,21 @@ export function createHttpApp(container: AppContainer): Hono {
     const authWallet = requireAuthWallet(c);
     const body = prepareBaseBridgeSchema.parse(await c.req.json());
     assertCallerMatchesWallet(authWallet, body.fromAddress);
+
+    if (!container.vaultReader.isDemoSafe(container.config.SAFE_ADDRESS)) {
+      const rawBaseBalance = await container.vaultReader.readErc20Balance({
+        tokenAddress: BASE_USDC_TOKEN.address,
+        ownerAddress: authWallet,
+        chainId: SUPPORTED_CHAINS.BASE.id,
+      });
+      const requiredRaw = toRawUnits(body.amountUsdc, BASE_USDC_TOKEN.decimals);
+      if (rawBaseBalance < requiredRaw) {
+        const humanBalance = fromRawUnits(rawBaseBalance, BASE_USDC_TOKEN.decimals);
+        throw new GuardrailError(
+          `Saldo insuficiente de USDC na rede Base: sua carteira possui ${humanBalance.toFixed(2)} USDC na Base, mas solicitou bridge de ${body.amountUsdc.toFixed(2)} USDC.`,
+        );
+      }
+    }
 
     const bridge = await container.dexGateway.buildCrossChainBaseToBscBridgeTransactions({
       fromBaseAddress: authWallet,

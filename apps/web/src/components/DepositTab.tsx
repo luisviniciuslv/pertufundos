@@ -129,6 +129,21 @@ export function DepositTab({
       return;
     }
 
+    if (isConnected && !safeMultisigClient.isDemoSafe(safeAddress)) {
+      if (rawBaseUsdc !== undefined && amount > baseUsdcBalance) {
+        setError(
+          `Saldo insuficiente na rede Base: você possui ${baseUsdcBalance.toFixed(2)} USDC na Base, mas tentou enviar ${amount.toFixed(2)} USDC.`,
+        );
+        return;
+      }
+      if (baseEthBalance !== undefined && baseEthBalance.value === 0n) {
+        setError(
+          "Você precisa de um pouco de ETH na rede Base (~US$ 0,05) para pagar a taxa de gás da bridge.",
+        );
+        return;
+      }
+    }
+
     setBridgeBusy(true);
     setError(null);
     setFeedback(null);
@@ -185,6 +200,21 @@ export function DepositTab({
     e.preventDefault();
     if (!activeWallet) {
       setError("Conecte sua carteira e assine o login gratuito no topo da página primeiro.");
+      return;
+    }
+    if (parsedAmount <= 0) {
+      setError("Informe um valor válido em USDC para depositar na Safe.");
+      return;
+    }
+    if (
+      isConnected &&
+      !safeMultisigClient.isDemoSafe(safeAddress) &&
+      rawBscUsdc !== undefined &&
+      parsedAmount > bscUsdcBalance
+    ) {
+      setError(
+        `Saldo insuficiente na BNB Chain: você possui ${bscUsdcBalance.toFixed(2)} USDC na BNB Chain, mas tentou transferir ${parsedAmount.toFixed(2)} USDC.`,
+      );
       return;
     }
     setBusy(true);
@@ -377,6 +407,14 @@ export function DepositTab({
               onChange={(e) => setBridgeAmountUsd(e.target.value)}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-500 focus:outline-none"
             />
+            {isConnected &&
+              !safeMultisigClient.isDemoSafe(safeAddress) &&
+              rawBaseUsdc !== undefined &&
+              (Number(bridgeAmountUsd) || 0) > baseUsdcBalance && (
+                <p className="mt-1 text-[11px] text-amber-300">
+                  Acima do seu saldo atual na Base ({baseUsdcBalance.toFixed(2)} USDC).
+                </p>
+              )}
           </div>
 
           <a

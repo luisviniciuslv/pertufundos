@@ -276,6 +276,26 @@ export class ViemVaultReader implements IVaultReader {
     });
   }
 
+  async readErc20Balance(params: {
+    tokenAddress: EvmAddress;
+    ownerAddress: EvmAddress;
+    chainId?: number;
+  }): Promise<bigint> {
+    if (this.isDemoSafe(params.ownerAddress)) {
+      return 0n;
+    }
+
+    const client =
+      params.chainId === SUPPORTED_CHAINS.BASE.id ? this.basePublicClient : this.publicClient;
+
+    return client.readContract({
+      address: toChecksumAddress(params.tokenAddress),
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [toChecksumAddress(params.ownerAddress)],
+    });
+  }
+
   private async readOndoMultipliers(
     vaultTokens: readonly TokenMetadata[],
   ): Promise<Map<string, number>> {

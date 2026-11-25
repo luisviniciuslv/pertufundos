@@ -78,8 +78,15 @@ const SIMULATED_EXTRA_OKX_TOKENS: readonly TokenMetadata[] = [
   },
 ];
 
+const PRICE_CACHE_TTL_MS = 2 * 60 * 1000;
+const OKX_MIN_REQUEST_INTERVAL_MS = 350;
+
 export class OkxDexGateway implements IDexGateway {
   private cachedChainTokens: { expiresAt: number; items: TokenMetadata[] } | null = null;
+  private readonly priceCache = new Map<string, { expiresAt: number; result: TokenPriceResult }>();
+  private readonly inFlightPriceRequests = new Map<string, Promise<TokenPriceResult>>();
+  private okxQueue: Promise<void> = Promise.resolve();
+  private lastOkxRequestAt = 0;
 
   constructor(private readonly config: AppConfig) {}
 
@@ -143,32 +150,71 @@ export class OkxDexGateway implements IDexGateway {
       return { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" };
     }
 
-    try {
-      const oneUnitRaw = toRawUnits(1, token.decimals).toString();
-      const quote = await this.requestOkx<{
-        toTokenAmount?: string;
-        routerResult?: {
-          toTokenAmount?: string;
-        };
-      }>("GET", "/api/v6/dex/aggregator/quote", {
-        chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
-        fromTokenAddress: token.address,
-        toTokenAddress: BNB_USDC_TOKEN.address,
-        amount: oneUnitRaw,
-      });
-
-      const first = quote[0];
-      const rawToAmount = first?.toTokenAmount ?? first?.routerResult?.toTokenAmount;
-      if (!rawToAmount) {
-        return { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" };
-      }
-      return {
-        unitPriceUsd: fromRawUnits(rawToAmount, BNB_USDC_TOKEN.decimals),
-        source: "OKX_LIVE",
-      };
-    } catch {
-      return { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" };
+    const cacheKey = token.address.toLowerCase();
+    const cached = this.priceCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.result;
     }
+
+    const existingInFlight = this.inFlightPriceRequests.get(cacheKey);
+    if (existingInFlight) {
+      return existingInFlight;
+    }
+
+    const requestPromise = (async (): Promise<TokenPriceResult> => {
+      try {
+        const oneUnitRaw = toRawUnits(1, token.decimals).toString();
+        const quote = await this.requestOkx<{
+          toTokenAmount?: string;
+          routerResult?: {
+            toTokenAmount?: string;
+          };
+        }>(
+          "GET",
+          "/api/v6/dex/aggregator/quote",
+          {
+            chainIndex: SUPPORTED_CHAINS.BNB.okxChainIndex,
+            fromTokenAddress: token.address,
+            toTokenAddress: BNB_USDC_TOKEN.address,
+            amount: oneUnitRaw,
+          },
+          { quietApiCodes: ["82000"] },
+        );
+
+        const first = quote[0];
+        const rawToAmount = first?.toTokenAmount ?? first?.routerResult?.toTokenAmount;
+        if (!rawToAmount) {
+          const fallback = { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" as const };
+          this.priceCache.set(cacheKey, {
+            expiresAt: Date.now() + PRICE_CACHE_TTL_MS,
+            result: fallback,
+          });
+          return fallback;
+        }
+
+        const live = {
+          unitPriceUsd: fromRawUnits(rawToAmount, BNB_USDC_TOKEN.decimals),
+          source: "OKX_LIVE" as const,
+        };
+        this.priceCache.set(cacheKey, {
+          expiresAt: Date.now() + PRICE_CACHE_TTL_MS,
+          result: live,
+        });
+        return live;
+      } catch {
+        const fallback = { unitPriceUsd: token.referencePriceUsd, source: "FALLBACK_DEMO" as const };
+        this.priceCache.set(cacheKey, {
+          expiresAt: Date.now() + 30_000,
+          result: fallback,
+        });
+        return fallback;
+      } finally {
+        this.inFlightPriceRequests.delete(cacheKey);
+      }
+    })();
+
+    this.inFlightPriceRequests.set(cacheKey, requestPromise);
+    return requestPromise;
   }
 
   async buildSwapTransactions(params: {
@@ -545,6 +591,22 @@ export class OkxDexGateway implements IDexGateway {
     };
   }
 
+  private enqueueOkxRequest<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.okxQueue.then(async () => {
+      const waitMs = Math.max(0, OKX_MIN_REQUEST_INTERVAL_MS - (Date.now() - this.lastOkxRequestAt));
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      this.lastOkxRequestAt = Date.now();
+      return task();
+    });
+    this.okxQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   /**
    * Assinatura oficial HMAC-SHA256 Base64 exigida pelo OKX Onchain OS (v5/v6)
    */
@@ -552,12 +614,27 @@ export class OkxDexGateway implements IDexGateway {
     method: "GET" | "POST",
     requestPath: string,
     query: Record<string, string>,
+    options: { quietApiCodes?: readonly string[]; retryCount?: number } = {},
   ): Promise<T[]> {
-    const queryString = new URLSearchParams(query).toString();
-    const fullPath = queryString ? `${requestPath}?${queryString}` : requestPath;
+    return this.enqueueOkxRequest(async () => {
+      const queryString = new URLSearchParams(query).toString();
+      const fullPath = queryString ? `${requestPath}?${queryString}` : requestPath;
+
+      const response = await this.fetchOkxRaw(method, fullPath);
+      if (response.status === 429 && (options.retryCount ?? 0) < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        this.lastOkxRequestAt = Date.now();
+        const retryResponse = await this.fetchOkxRaw(method, fullPath);
+        return this.parseOkxResponse<T>(retryResponse, requestPath, options);
+      }
+
+      return this.parseOkxResponse<T>(response, requestPath, options);
+    });
+  }
+
+  private async fetchOkxRaw(method: "GET" | "POST", fullPath: string): Promise<Response> {
     const timestamp = new Date().toISOString();
     const prehash = `${timestamp}${method}${fullPath}`;
-
     const signature = crypto
       .createHmac("sha256", this.config.OKX_SECRET_KEY)
       .update(prehash)
@@ -575,11 +652,17 @@ export class OkxDexGateway implements IDexGateway {
       headers["OK-ACCESS-PROJECT"] = this.config.OKX_PROJECT_ID;
     }
 
-    const response = await fetch(`${this.config.OKX_BASE_URL}${fullPath}`, {
+    return fetch(`${this.config.OKX_BASE_URL}${fullPath}`, {
       method,
       headers,
     });
+  }
 
+  private async parseOkxResponse<T>(
+    response: Response,
+    requestPath: string,
+    options: { quietApiCodes?: readonly string[] },
+  ): Promise<T[]> {
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
       let detail = errText;
@@ -599,7 +682,9 @@ export class OkxDexGateway implements IDexGateway {
 
     const payload = (await response.json()) as OkxApiResponse<T>;
     if (payload.code !== "0") {
-      console.error(`[OKX API ${payload.code}] ${requestPath}:`, payload.msg);
+      if (!options.quietApiCodes?.includes(payload.code)) {
+        console.error(`[OKX API ${payload.code}] ${requestPath}:`, payload.msg);
+      }
       throw new DomainError(
         `Erro OKX DEX [${payload.code}]: ${payload.msg}`,
         422,

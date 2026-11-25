@@ -48,7 +48,9 @@ export class PortfolioValuationService {
         const priceResult =
           snap.token.category === "STABLECOIN"
             ? { unitPriceUsd: 1.0, source: "OKX_LIVE" as const }
-            : await this.dexGateway.getUnitPriceUsd(snap.token);
+            : snap.rawBalance === 0n
+              ? { unitPriceUsd: snap.token.referencePriceUsd, source: "FALLBACK_DEMO" as const }
+              : await this.dexGateway.getUnitPriceUsd(snap.token);
 
         // Em Ondo Stocks na BNB Chain, se o preço DEX já é por token on-chain, usamos balance * unitPriceUsd;
         // exibimos economicShares (balance * sharesMultiplier) para transparência de dividendos reinvestidos.

@@ -38,4 +38,9 @@ export interface IVaultReader {
     spenderAddress: EvmAddress;
     chainId?: number;
   }): Promise<bigint>;
+  readErc20Balance(params: {
+    tokenAddress: EvmAddress;
+    ownerAddress: EvmAddress;
+    chainId?: number;
+  }): Promise<bigint>;
 }
