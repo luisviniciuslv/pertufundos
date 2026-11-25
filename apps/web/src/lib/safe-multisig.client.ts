@@ -1,6 +1,6 @@
 import type { Eip1193Provider } from "@safe-global/protocol-kit";
 import type { EvmAddress, PreparedSafeBatch } from "@pertufundos/shared";
-import { getAddress } from "viem";
+import { createPublicClient, custom, getAddress, parseAbi } from "viem";
 
 const DEMO_SAFE_PLACEHOLDER = "0x1111111111111111111111111111111111111111";
 
@@ -19,6 +19,13 @@ async function initSafeKits(params: {
   safeAddress: EvmAddress;
   chainId: number;
 }) {
+  const safeApiKey = runtimeSafeApiKey || process.env.NEXT_PUBLIC_SAFE_API_KEY?.trim() || "";
+  if (!safeApiKey) {
+    throw new Error(
+      "Chave SAFE_API_KEY não configurada no servidor. Gere gratuitamente em developer.safe.global e configure SAFE_API_KEY (ou NEXT_PUBLIC_SAFE_API_KEY) para enviar e assinar transações na fila da Safe.",
+    );
+  }
+
   const [{ default: Safe }, { default: SafeApiKit }, { OperationType }] = await Promise.all([
     import("@safe-global/protocol-kit"),
     import("@safe-global/api-kit"),
@@ -28,16 +35,60 @@ async function initSafeKits(params: {
   const checksumSigner = getAddress(params.signerAddress.toLowerCase()) as EvmAddress;
   const checksumSafe = getAddress(params.safeAddress.toLowerCase()) as EvmAddress;
 
-  const protocolKit = await Safe.init({
-    provider: params.provider,
-    signer: checksumSigner,
+  const providerChainHex = await params.provider
+    .request({ method: "eth_chainId" })
+    .catch(() => null);
+  const providerChainId =
+    typeof providerChainHex === "string"
+      ? Number.parseInt(providerChainHex, 16)
+      : typeof providerChainHex === "number"
+        ? providerChainHex
+        : undefined;
+
+  if (providerChainId !== undefined && providerChainId !== params.chainId) {
+    throw new Error(
+      `Sua carteira está na rede chainId=${providerChainId}, mas a Safe opera na BNB Smart Chain (chainId=${params.chainId}). Troque a rede na carteira e tente novamente.`,
+    );
+  }
+
+  console.info("[Safe] Inicializando Protocol Kit", {
     safeAddress: checksumSafe,
+    signer: checksumSigner,
+    chainId: params.chainId,
+    providerChainId,
   });
 
-  const safeApiKey = runtimeSafeApiKey || process.env.NEXT_PUBLIC_SAFE_API_KEY?.trim() || "";
+  let protocolKit: Awaited<ReturnType<typeof Safe.init>>;
+  try {
+    protocolKit = await Safe.init({
+      provider: params.provider,
+      signer: checksumSigner,
+      safeAddress: checksumSafe,
+    });
+  } catch (err) {
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    if (rawMsg.includes("Invalid Safe version")) {
+      let detectedVersion = "desconhecida";
+      try {
+        const reader = createPublicClient({ transport: custom(params.provider) });
+        detectedVersion = await reader.readContract({
+          address: checksumSafe,
+          abi: parseAbi(["function VERSION() view returns (string)"]),
+          functionName: "VERSION",
+        });
+      } catch {
+        // Mantém desconhecida se VERSION() falhar
+      }
+      throw new Error(
+        `Versão do contrato Safe (${detectedVersion}) não reconhecida para ${checksumSafe} na rede ${params.chainId}.`,
+      );
+    }
+    throw err;
+  }
+
   const apiKit = new SafeApiKit({
     chainId: BigInt(params.chainId),
-    ...(safeApiKey ? { apiKey: safeApiKey } : {}),
+    apiKey: safeApiKey,
   });
 
   return { protocolKit, apiKit, OperationType, checksumSigner, checksumSafe };
