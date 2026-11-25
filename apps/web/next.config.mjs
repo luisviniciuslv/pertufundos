@@ -12,6 +12,9 @@ const nextConfig = {
   },
   experimental: {
     webpackMemoryOptimizations: true,
+    webpackBuildWorker: false,
+    parallelServerCompiles: false,
+    parallelServerBuildTraces: false,
     cpus: isLowMemoryBuild ? 1 : undefined,
     workerThreads: false,
   },
@@ -20,6 +23,13 @@ const nextConfig = {
       ...config.resolve.alias,
       "@base-org/account": false,
       "@coinbase/cdp-sdk": false,
+      "@coinbase/wallet-sdk": false,
+      "@gemini-wallet/core": false,
+      "@metamask/sdk": false,
+      "@react-native-async-storage/async-storage": false,
+      "@safe-global/safe-apps-sdk": false,
+      porto: false,
+      "porto/internal": false,
     };
     config.resolve.fallback = {
       ...config.resolve.fallback,
