@@ -49,18 +49,6 @@ export class SqliteFundRepository implements IFundRepository {
     this.initializeSchema();
   }
 
-  // TODO: REMOVER RESET TEMPORÁRIO após confirmação do usuário
-  async clearAllDataForReset(): Promise<void> {
-    this.db.exec(`
-      DELETE FROM proposal_votes;
-      DELETE FROM proposals;
-      DELETE FROM ledger_entries;
-      DELETE FROM nav_snapshots;
-      DELETE FROM users;
-      DELETE FROM custom_tokens;
-    `);
-  }
-
   private initializeSchema(): void {
     this.db.exec(`
       PRAGMA foreign_keys = ON;

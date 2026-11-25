@@ -174,7 +174,7 @@ O projeto já inclui o empacotador automático [scripts/build-squarecloud-bundle
    ```
 3. Faça upload do `.zip` (ou conecte o **Webhook nativo do GitHub** em *Settings → Deploys* na Square Cloud — o `server.mjs` na raiz já detecta deploy via Git e compila em modo econômico sequencial dentro de `1024 MB` de RAM!) e configure as variáveis de ambiente (`STORAGE_DRIVER=postgres`, `DATABASE_URL`, `DATABASE_SSL_CERT_BASE64`, `AUTH_SESSION_SECRET`, `CORS_ORIGIN`, `SAFE_ADDRESS`, `SAFE_THRESHOLD`, `OKX_*`, `ALCHEMY_WEBHOOK_SIGNING_KEY`).
 4. **Atualização Automática a cada `git push`:** Conecte o **Webhook Direto da Square Cloud** (*Settings → Deploys → GitHub / Webhook*) direto na raiz do repositório usando o [squarecloud.app](file:///c:/Users/vinil/Documents/pertufundos/squarecloud.app) + [scripts/lowmem-build.mjs](file:///c:/Users/vinil/Documents/pertufundos/scripts/lowmem-build.mjs) (compila lá dentro em ~1 minuto dentro dos `1024 MB`).
-5. Para ligar na Safe real do grupo (saindo do modo demonstração), altere `SAFE_ADDRESS`, `SAFE_THRESHOLD` e defina `SEED_DEMO_ON_EMPTY=false`.
+5. Para ligar na Safe real do grupo, altere `SAFE_ADDRESS` e `SAFE_THRESHOLD` (o servidor não cria mais usuários fictícios na inicialização).
 
 #### B2. Alternativa Gratuita Separada (Neon + Railway/Render + Vercel)
 
