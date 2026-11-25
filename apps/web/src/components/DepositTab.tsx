@@ -24,7 +24,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
-import { erc20Abi } from "viem";
+import { erc20Abi, getAddress } from "viem";
 import {
   useAccount,
   useBalance,
@@ -38,7 +38,7 @@ import { InfoTip } from "@/components/InfoTip";
 import { fundApi } from "@/lib/api-client";
 import { formatShares, formatUsd, shortenAddress } from "@/lib/formatters";
 import { safeMultisigClient } from "@/lib/safe-multisig.client";
-import { ensureWalletChain } from "@/lib/wallet-helpers";
+import { ensureWalletChain, WalletTimeoutError, withTimeout } from "@/lib/wallet-helpers";
 
 interface DepositTabProps {
   safeAddress: EvmAddress;
@@ -85,19 +85,28 @@ export function DepositTab({
     chainId: SUPPORTED_CHAINS.BASE.id,
     query: { enabled: Boolean(walletForBalances) },
   });
+  const { data: bscBnbBalance, refetch: refetchBscBnb } = useBalance({
+    address: walletForBalances,
+    chainId: SUPPORTED_CHAINS.BNB.id,
+    query: { enabled: Boolean(walletForBalances) },
+  });
 
   const baseUsdcBalance = rawBaseUsdc !== undefined ? fromRawUnits(rawBaseUsdc, BASE_USDC_TOKEN.decimals) : 0;
   const bscUsdcBalance = rawBscUsdc !== undefined ? fromRawUnits(rawBscUsdc, BNB_USDC_TOKEN.decimals) : 0;
   const baseEthHuman = baseEthBalance ? Number(baseEthBalance.formatted) : 0;
+  const bscBnbHuman = bscBnbBalance ? Number(bscBnbBalance.formatted) : 0;
 
   const [amountUsd, setAmountUsd] = useState("500");
   const [bridgeAmountUsd, setBridgeAmountUsd] = useState("100");
   const [bridgeTxHash, setBridgeTxHash] = useState<string | null>(null);
+  const [depositTxHash, setDepositTxHash] = useState<string | null>(null);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [copiedSafe, setCopiedSafe] = useState(false);
   const [newNickname, setNewNickname] = useState("");
   const [newWallet, setNewWallet] = useState("");
   const [busy, setBusy] = useState(false);
+  const [depositStep, setDepositStep] = useState<string | null>(null);
+  const depositAttemptRef = useRef(0);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeStep, setBridgeStep] = useState<string | null>(null);
   const bridgeAttemptRef = useRef(0);
@@ -109,7 +118,7 @@ export function DepositTab({
   const isDemo = safeMultisigClient.isDemoSafe(safeAddress);
 
   async function refreshWalletBalances() {
-    await Promise.all([refetchBaseUsdc(), refetchBscUsdc()]);
+    await Promise.all([refetchBaseUsdc(), refetchBscUsdc(), refetchBscBnb()]);
   }
 
   async function handleCopyWallet() {
@@ -318,19 +327,85 @@ export function DepositTab({
       setError("Informe um valor válido em USDC para depositar na Safe.");
       return;
     }
-    if (isConnected && !isDemo && rawBscUsdc !== undefined && parsedAmount > bscUsdcBalance) {
-      setError(
-        `Saldo insuficiente na BNB Chain: você possui ${bscUsdcBalance.toFixed(2)} USDC na BNB Chain, mas tentou transferir ${parsedAmount.toFixed(2)} USDC.`,
-      );
-      return;
+    if (isConnected && !isDemo) {
+      if (!connector) {
+        setError("Sua carteira ainda está reconectando ou desconectada. Reconecte no topo da página e tente novamente.");
+        return;
+      }
+      if (rawBscUsdc !== undefined && parsedAmount > bscUsdcBalance) {
+        setError(
+          `Saldo insuficiente na BNB Chain: você possui ${bscUsdcBalance.toFixed(2)} USDC na BNB Chain, mas tentou transferir ${parsedAmount.toFixed(2)} USDC.`,
+        );
+        return;
+      }
+      if (bscBnbBalance !== undefined && bscBnbBalance.value === 0n) {
+        setError(
+          "Você precisa de um pouco de BNB na BNB Smart Chain (~US$ 0,05) para pagar a taxa de gás da transferência para a Safe.",
+        );
+        return;
+      }
     }
+
+    const attemptId = ++depositAttemptRef.current;
     setBusy(true);
+    setDepositStep("1/5 Preparando transferência de USDC...");
     setError(null);
     setFeedback(null);
+    setDepositTxHash(null);
+
+    console.info("[Deposit] Iniciando transferência para Safe", {
+      attemptId,
+      activeWallet,
+      safeAddress,
+      parsedAmount,
+      isConnected,
+      isDemo,
+      currentChainId,
+      connectorId: connector?.id,
+    });
 
     try {
       let txHash: `0x${string}`;
       if (isConnected && !isDemo) {
+        const checksumFrom = getAddress(activeWallet.toLowerCase()) as EvmAddress;
+        const checksumSafe = getAddress(safeAddress.toLowerCase()) as EvmAddress;
+        const rawAmount = toRawUnits(parsedAmount, BNB_USDC_TOKEN.decimals);
+
+        if (bscPublicClient) {
+          setDepositStep("1/5 Simulando transferência na BNB Chain...");
+          console.info("[Deposit] Pré-simulando transfer ERC-20 na BNB Chain", {
+            token: BNB_USDC_TOKEN.address,
+            from: checksumFrom,
+            to: checksumSafe,
+            rawAmount: rawAmount.toString(),
+          });
+          try {
+            await withTimeout(
+              bscPublicClient.simulateContract({
+                account: checksumFrom,
+                address: BNB_USDC_TOKEN.address,
+                abi: erc20Abi,
+                functionName: "transfer",
+                args: [checksumSafe, rawAmount],
+              }),
+              10_000,
+              "Timeout na simulação RPC da BNB Chain.",
+            );
+          } catch (simErr) {
+            if (simErr instanceof WalletTimeoutError) {
+              console.warn("[Deposit] Simulação RPC demorou >10s; seguindo para carteira.");
+            } else {
+              const rawMsg =
+                simErr instanceof Error ? simErr.message.split("\n")[0] : "reversão na simulação";
+              throw new Error(
+                `Simulação na BNB Chain detectou que a transferência iria falhar (${rawMsg}). Verifique se você tem USDC e BNB para gás suficientes.`,
+              );
+            }
+          }
+          if (depositAttemptRef.current !== attemptId) return;
+        }
+
+        setDepositStep("2/5 Verificando/trocando carteira para BNB Smart Chain...");
         await ensureWalletChain({
           currentChainId,
           targetChainId: SUPPORTED_CHAINS.BNB.id,
@@ -338,20 +413,44 @@ export function DepositTab({
           connector,
           switchChainAsync,
         });
+        if (depositAttemptRef.current !== attemptId) return;
+
+        setDepositStep(
+          "3/5 Confirme a transferência na extensão/app da sua carteira (se não abriu, clique no ícone da carteira)...",
+        );
+        console.info("[Deposit] Solicitando assinatura via writeContractAsync", {
+          chainId: SUPPORTED_CHAINS.BNB.id,
+          connectorId: connector?.id,
+          to: checksumSafe,
+          amountUsdc: parsedAmount,
+        });
+
         // Transferência real ERC-20 de USDC na BNB Chain (18 decimais!) para o endereço da Safe
-        const rawAmount = toRawUnits(parsedAmount, BNB_USDC_TOKEN.decimals);
         txHash = await writeContractAsync({
+          account: checksumFrom,
+          connector,
           address: BNB_USDC_TOKEN.address,
           abi: erc20Abi,
           functionName: "transfer",
-          args: [safeAddress, rawAmount],
+          args: [checksumSafe, rawAmount],
           chainId: SUPPORTED_CHAINS.BNB.id,
         });
+        console.info("[Deposit] Transação enviada pela carteira", { txHash });
+        if (depositAttemptRef.current !== attemptId) return;
+        setDepositTxHash(txHash);
+
         if (bscPublicClient) {
+          setDepositStep("4/5 Transação enviada! Aguardando confirmação na BNB Chain...");
           const receipt = await bscPublicClient.waitForTransactionReceipt({
             hash: txHash,
-            timeout: 120_000,
+            timeout: 90_000,
           });
+          console.info("[Deposit] Recibo recebido", {
+            txHash,
+            status: receipt.status,
+            blockNumber: receipt.blockNumber?.toString(),
+          });
+          if (depositAttemptRef.current !== attemptId) return;
           if (receipt.status !== "success") {
             throw new Error(
               `A transferência de USDC falhou on-chain na BNB Chain (status: reverted). Confira no BscScan: ${buildExplorerTxUrl(txHash, SUPPORTED_CHAINS.BNB.id)}`,
@@ -365,21 +464,31 @@ export function DepositTab({
         txHash = `0x${rand}`;
       }
 
+      setDepositStep("5/5 Registrando aporte no servidor e emitindo suas cotas...");
+      console.info("[Deposit] Registrando aporte no backend", { txHash, parsedAmount });
       const res = await fundApi.recordDeposit({
         fromAddress: activeWallet,
         amountUsd: parsedAmount,
         txHash,
       });
+      if (depositAttemptRef.current !== attemptId) return;
 
       await refreshWalletBalances();
+      if (depositAttemptRef.current !== attemptId) return;
       setFeedback(
         `Aporte registrado com sucesso! Você recebeu +${formatShares(res.entry.sharesDelta)} cotas ao preço de US$ ${res.entry.navAtExecutionUsd.toFixed(4)} por cota.`,
       );
       await onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao processar aporte.");
+      console.error("[Deposit] Falha ao transferir USDC para a Safe", err);
+      if (depositAttemptRef.current === attemptId) {
+        setError(err instanceof Error ? err.message : "Erro ao processar aporte.");
+      }
     } finally {
-      setBusy(false);
+      if (depositAttemptRef.current === attemptId) {
+        setBusy(false);
+        setDepositStep(null);
+      }
     }
   }
 
@@ -530,7 +639,11 @@ export function DepositTab({
                 {bscUsdcBalance.toFixed(2)} USDC
               </p>
               <p className="text-[11px] text-slate-400 mt-1">
-                Pronto para depositar no Passo 3 abaixo
+                Taxa de gás (BNB):{" "}
+                <span className={bscBnbHuman < 0.0002 ? "text-amber-300" : "text-emerald-300"}>
+                  {bscBnbHuman.toFixed(5)} BNB
+                </span>
+                {bscBnbHuman < 0.0002 && " — deixe ~US$ 0,20 em BNB para transferir para a Safe"}
               </p>
             </div>
           </div>
@@ -717,6 +830,40 @@ export function DepositTab({
                 ? "Simular Depósito & Receber Cotas"
                 : "Transferir USDC para a Safe"}
           </button>
+
+          {busy && depositStep && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200 flex flex-wrap items-center justify-between gap-2">
+              <span>{depositStep}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  depositAttemptRef.current += 1;
+                  setBusy(false);
+                  setDepositStep(null);
+                  setError("Transferência cancelada manualmente. Verifique sua carteira antes de tentar novamente.");
+                  console.warn("[Deposit] Espera cancelada manualmente pelo usuário.");
+                }}
+                className="rounded-lg border border-emerald-400/40 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-emerald-200 hover:bg-slate-800 transition"
+              >
+                Cancelar espera
+              </button>
+            </div>
+          )}
+
+          {depositTxHash && (
+            <div className="text-xs text-emerald-300 flex items-center gap-2">
+              <span>Transação enviada na BNB Chain:</span>
+              <a
+                href={buildExplorerTxUrl(depositTxHash, SUPPORTED_CHAINS.BNB.id)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono underline hover:text-emerald-200"
+              >
+                {shortenAddress(depositTxHash)}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          )}
         </form>
 
         {/* Cadastro de Novo Amigo */}

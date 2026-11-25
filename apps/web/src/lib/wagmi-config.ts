@@ -1,5 +1,5 @@
 import { defineChain } from "viem";
-import { cookieStorage, createConfig, createStorage, http } from "wagmi";
+import { cookieStorage, createConfig, createStorage, fallback, http } from "wagmi";
 import { injected, walletConnect } from "wagmi/connectors";
 
 const bscChain = defineChain({
@@ -64,8 +64,15 @@ function buildWagmiConfig(projectId: string, isBrowser: boolean) {
       storage: cookieStorage,
     }),
     transports: {
-      [bscChain.id]: http(),
-      [baseChain.id]: http(),
+      [bscChain.id]: fallback([
+        http("https://bsc-dataseed.binance.org", { timeout: 10_000 }),
+        http("https://bsc-dataseed1.defibit.io", { timeout: 10_000 }),
+        http("https://bsc-rpc.publicnode.com", { timeout: 10_000 }),
+      ]),
+      [baseChain.id]: fallback([
+        http("https://mainnet.base.org", { timeout: 10_000 }),
+        http("https://base-rpc.publicnode.com", { timeout: 10_000 }),
+      ]),
     },
     ssr: true,
   });

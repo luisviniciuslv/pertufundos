@@ -42,8 +42,22 @@ export async function ensureWalletChain(params: {
 
   const liveChainId =
     typeof connector?.getChainId === "function"
-      ? await connector.getChainId().catch(() => currentChainId)
+      ? await withTimeout(
+          connector.getChainId(),
+          5_000,
+          "Timeout ao consultar rede atual da carteira.",
+        ).catch((err) => {
+          console.warn("[Wallet] getChainId falhou/expirou; usando currentChainId:", currentChainId, err);
+          return currentChainId;
+        })
       : currentChainId;
+
+  console.info("[Wallet] ensureWalletChain", {
+    connectorId: connector?.id,
+    currentChainId,
+    liveChainId,
+    targetChainId,
+  });
 
   if (liveChainId === targetChainId || !switchChainAsync) {
     return;
@@ -55,8 +69,10 @@ export async function ensureWalletChain(params: {
       15_000,
       `Tempo esgotado ao trocar sua carteira para a rede ${targetChainLabel}. Selecione a rede ${targetChainLabel} manualmente na carteira e tente novamente.`,
     );
+    console.info("[Wallet] Rede alterada com sucesso para", targetChainId);
   } catch (err) {
     if (err instanceof WalletTimeoutError && connector?.id === "walletConnect") {
+      console.warn("[Wallet] switchChain expirou em WalletConnect; prosseguindo para prompt de transação.");
       return;
     }
     throw err;
