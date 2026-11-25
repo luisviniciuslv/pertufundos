@@ -11,6 +11,12 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "allowScripts": {
+    "bufferutil": true,
+    "esbuild": true,
+    "keccak": true,
+    "utf-8-validate": true
+  },
   "scripts": {
     "dev": "pnpm --parallel -r dev",
     "dev:api": "pnpm --filter @pertufundos/api dev",
