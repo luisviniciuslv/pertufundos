@@ -3,6 +3,7 @@
 import { Check, Copy, QrCode, Smartphone, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface WalletConnectQrModalProps {
   uri: string | null;
@@ -12,6 +13,11 @@ interface WalletConnectQrModalProps {
 export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!uri) {
@@ -38,7 +44,7 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
     };
   }, [uri]);
 
-  if (!uri) return null;
+  if (!uri || !mounted) return null;
 
   const handleCopy = async () => {
     try {
@@ -50,9 +56,15 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+  return createPortal(
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
@@ -115,6 +127,7 @@ export function WalletConnectQrModal({ uri, onClose }: WalletConnectQrModalProps
           </a>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
