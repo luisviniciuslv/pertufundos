@@ -460,36 +460,12 @@ export class OkxDexGateway implements IDexGateway {
     const rawFromAmount = toRawUnits(params.usdcAmount, params.fromToken.decimals);
     const transactions: SafeMetaTx[] = [];
 
-    const approveData = await this.requestOkx<{
-      data: `0x${string}`;
-      dexContractAddress: EvmAddress;
-    }>("GET", "/api/v6/dex/aggregator/approve-transaction", {
-      chainIndex: params.fromChain.okxChainIndex,
-      tokenContractAddress: params.fromToken.address,
-      approveAmount: rawFromAmount.toString(),
-    });
-
-    const approveItem = approveData[0];
-    if (approveItem) {
-      const spender = approveItem.dexContractAddress.toLowerCase() as EvmAddress;
-      const currentAllowance = params.getSourceAllowance
-        ? await params.getSourceAllowance(spender).catch(() => 0n)
-        : 0n;
-      if (currentAllowance < rawFromAmount) {
-        transactions.push({
-          to: params.fromToken.address,
-          value: "0",
-          data: approveItem.data,
-          operation: 0,
-          description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (${params.fromChain.name}) para OKX Cross-Chain`,
-        });
-      }
-    }
-
     const crossTx = await this.requestOkx<{
       routerResult?: {
         toTokenAmount?: string;
+        dexContractAddress?: EvmAddress;
       };
+      dexContractAddress?: EvmAddress;
       toTokenAmount?: string;
       tx: {
         to: EvmAddress;
@@ -522,12 +498,39 @@ export class OkxDexGateway implements IDexGateway {
       : params.usdcAmount;
 
     const bridgeRouter = bridgeItem.tx.to.toLowerCase() as EvmAddress;
+    // Pontes diretas no OKX cross-chain/swap (ex: Relay: Depository 0x4cd00e...) debitam do próprio tx.to,
+    // enquanto rotas via proxy OKX podem usar dexContractAddress explícito.
+    const explicitSpender = (
+      bridgeItem.dexContractAddress ?? bridgeItem.routerResult?.dexContractAddress
+    )?.toLowerCase() as EvmAddress | undefined;
+    const primarySpender = explicitSpender ?? bridgeRouter;
+
+    const primaryAllowance = params.getSourceAllowance
+      ? await params.getSourceAllowance(primarySpender).catch(() => 0n)
+      : 0n;
+
+    if (primaryAllowance < rawFromAmount) {
+      const approveCalldata = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [primarySpender, rawFromAmount],
+      });
+      transactions.push({
+        to: params.fromToken.address,
+        value: "0",
+        data: approveCalldata,
+        operation: 0,
+        description: `Aprovar US$ ${params.usdcAmount.toFixed(2)} USDC (${params.fromChain.name}) para contrato da bridge`,
+      });
+    }
+
     console.info("[OKX Cross-Chain Bridge]", {
       fromChain: params.fromChain.id,
       toChain: params.toChain.id,
       amountUsdc: params.usdcAmount,
       expectedOutAmount,
-      approveSpender: approveItem?.dexContractAddress ?? null,
+      primarySpender,
+      primaryAllowance: primaryAllowance.toString(),
       txTo: bridgeRouter,
       txValueWei: bridgeItem.tx.value || "0",
       txSelector: bridgeItem.tx.data.slice(0, 10),

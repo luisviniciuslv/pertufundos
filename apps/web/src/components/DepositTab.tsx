@@ -242,11 +242,11 @@ export function DepositTab({
       };
 
       let lastHash: `0x${string}` | undefined;
-      if (activeBridge.transactions.length > 1) {
+      for (let pass = 0; pass < 2 && activeBridge.transactions.length > 1; pass++) {
         const approveTx = activeBridge.transactions[0]!;
         lastHash = await sendAndConfirmBaseTx(
           approveTx,
-          `3/4 Confirme na sua carteira (1/2 — Aprovar USDC): ${approveTx.description}`,
+          `3/4 Confirme na sua carteira (Approve USDC): ${approveTx.description}`,
           "3/4 Aguardando confirmação do Approve na rede Base...",
         );
         if (bridgeAttemptRef.current !== attemptId) return;
