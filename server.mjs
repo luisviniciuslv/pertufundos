@@ -25,12 +25,39 @@ function hasRequiredBuildDeps() {
   }
 }
 
+function getNewestMtimeMs(targetPath) {
+  if (!fs.existsSync(targetPath)) return 0;
+  const stat = fs.statSync(targetPath);
+  if (!stat.isDirectory()) return stat.mtimeMs;
+  let newest = 0;
+  for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+    const childMtime = getNewestMtimeMs(path.join(targetPath, entry.name));
+    if (childMtime > newest) newest = childMtime;
+  }
+  return newest;
+}
+
 function ensureBuiltArtifacts() {
   const apiEntry = path.join(__dirname, "apps/api/dist/bootstrap.js");
   const webBuildId = path.join(__dirname, "apps/web/.next/BUILD_ID");
 
-  if (fs.existsSync(apiEntry) && fs.existsSync(webBuildId)) {
-    return;
+  const artifactsExist = fs.existsSync(apiEntry) && fs.existsSync(webBuildId);
+  if (artifactsExist) {
+    const oldestArtifactMtime = Math.min(
+      fs.statSync(apiEntry).mtimeMs,
+      fs.statSync(webBuildId).mtimeMs,
+    );
+    const newestSourceMtime = Math.max(
+      getNewestMtimeMs(path.join(__dirname, "packages/shared/src")),
+      getNewestMtimeMs(path.join(__dirname, "apps/api/src")),
+      getNewestMtimeMs(path.join(__dirname, "apps/web/src")),
+      getNewestMtimeMs(path.join(__dirname, "apps/web/next.config.mjs")),
+      getNewestMtimeMs(path.join(__dirname, "scripts/lowmem-build.mjs")),
+    );
+    if (newestSourceMtime <= oldestArtifactMtime) {
+      return;
+    }
+    console.log("🔄 Código-fonte atualizado detectado via Git. Recompilando em etapas econômicas...");
   }
 
   if (!hasRequiredBuildDeps()) {
